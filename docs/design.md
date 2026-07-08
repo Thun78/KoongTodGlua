@@ -95,6 +95,13 @@ During open play the frontend asks the Gemma service every 30 to 60 seconds (and
 5. Project detections to field XY, associate into tracks, smooth.
 6. Export tracks as JSON.
 
+**Why one camera is enough.** We never do true multi-view 3D reconstruction. The pitch is a flat plane with exactly known dimensions and standardized markings, so detecting a few landmarks (line intersections, box corners, center circle) yields a per-frame homography that maps any image point on the grass to exact field coordinates. Each player's ground contact point (bottom-center of the YOLO box) projects through it to an accurate field XY, where we place a generic 3D player model oriented along its velocity. The scene is a stylized video-game-style replica, not a volumetric capture. Known single-camera limits and their workarounds:
+
+1. Airborne ball projects wrongly (homography only holds on the grass). Track the ball at ground contacts only and synthesize a physically plausible arc between them.
+2. Off-screen players. Animate visible players only, or fill the rest from the StatsBomb 360 freeze-frame for that event, which records all 22 positions.
+3. Occlusion gaps in tracks. Smoothing and interpolation over the few-second clip.
+4. Camera pans and zooms. Re-estimate the homography every frame with the pitch-keypoint model, which is built for this.
+
 **Rendering.** Three.js stadium scene. Low-poly player capsules colored by team, a ball, orbit controls. The replay animates the tracked positions. Polish items in order of value are camera presets (behind the goal, aerial, touchline), slow motion, then player numbers.
 
 **Fallbacks, in order.**
