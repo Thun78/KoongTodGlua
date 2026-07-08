@@ -31,7 +31,7 @@ The demo match is the 2022 World Cup final, Argentina vs France. Full event data
 StatsBomb Open Data (free, real event-level data)
         │
         ▼
-Match Replay Engine ── streams events over WebSocket, "live" at adjustable speed
+Match Replay Engine ── streams events over WebSocket, adjustable speed + seek/jump to moments
         │
         ├──► Gemma 4 service (SFT on MI300X, served via vLLM on ROCm) — two request types
         │        predict:  match-state JSON → {final_score, corners, cards, possession, rationale}
@@ -65,9 +65,11 @@ All services run from one docker-compose file, which satisfies the containerizat
 
 **Training.** Supervised fine-tune of a small Gemma 4 variant on one MI300X instance on AMD Developer Cloud, following AMD's AI Academy fine-tuning workflow. The $100 AMD cloud credits cover this. Expect hours, not days. Output format is strict JSON with a one-line rationale field.
 
-**Serving.** vLLM on ROCm inside the container, so the model is both trained and served on AMD.
+**Serving and GPU budget.** The model service reads a `MODEL_BACKEND` env var with three values. `fireworks` calls hosted Gemma 4 (dev default, and what a judge running docker-compose gets, since they have no AMD GPU). `vllm` points at our fine-tune served with vLLM on ROCm on an AMD cloud instance. `heuristic` is the no-network fallback. The $100 credit is roughly 50 MI300X-hours at ~$2/hr, so the instance runs in short bursts only — training runs, final integration, demo recording — never left up overnight as a dev box. The README documents both backends, and the demo video records against `vllm` so the trained-and-served-on-AMD story is real.
 
 **Fireworks credits ($50, code FW-LABLAB-9W9C).** Used for dev-time experimentation and prompt iteration against hosted Gemma 4 before our fine-tune is ready, so frontend and backend never wait on training.
+
+**Extra time caveat.** The demo match went to extra time and penalties, but the training labels come from 90-minute matches. The model predicts regulation-time (90 minute) final stats by definition, and the demo narrative ends at 3-3 with penalties as a closing beat, not a predicted quantity.
 
 **Fallback.** A rate-extrapolation baseline (current stats scaled to 90 minutes, plus league averages) sits behind the same API. If the fine-tune underperforms, the panel still works and the demo proceeds.
 
@@ -79,13 +81,17 @@ During open play the frontend asks the Gemma service every 30 to 60 seconds (and
 
 **Training.** Mixed into the same SFT run as the predictor. Examples are generated with heuristic persona rules (each persona has a base stat set plus match-state triggers, for example fouls spiking surfaces card stats) refined by Fireworks-hosted Gemma 4. One to two thousand examples is plenty. This costs P1 an extra hour in the dataset script, not a second training pipeline.
 
-**Fallback.** Prompt-only against the same served model, no fine-tuning needed. This is also the day 1 mode so the frontend can build against the real API shape immediately. If even that misbehaves, the heuristic persona rules run directly in the backend.
+**Fallback.** Prompt-only curation, no fine-tuning needed. On day 1 this runs against Fireworks-hosted Gemma (`MODEL_BACKEND=fireworks`), then switches to our vLLM endpoint once the fine-tune is served — same API shape either way, so the frontend builds against the real contract immediately. If even that misbehaves, the heuristic persona rules run directly in the backend.
 
 **Personas.** Three presets, passed to the model as part of the request. Casual Fan, Analyst, Bettor. Behaviour learning from clicks stays out of scope, future-work slide.
+
+**Stat vocabulary.** The fixed list the curator picks from is written down on day 1 because frontend panels, backend computation, and training data all depend on it. It includes two derived stats that someone must own computing from StatsBomb events. Momentum is the rolling xG differential over the last 10 minutes. Pressing intensity is pressure events per opposition possession. Formations come from StatsBomb lineup and tactics events. P4 owns the derived-stat computation in the replay backend.
 
 ## Component 2 — 3D moment replica (the wow)
 
 **Scope discipline.** Two or three pre-chosen goal clips, processed offline. The CV is real, the risk is not live.
+
+**Clip selection is a day 1 task with a hard criterion.** Broadcast coverage cuts to close-ups and crowd shots the instant a goal goes in, and the homography needs one continuous wide-angle shot. Candidate moments are chosen by footage first, drama second: a continuous wide shot covering the buildup, or it does not qualify. Messi's second (the long team move) likely qualifies; Mbappé's volley probably cuts too fast. P2 verifies actual footage before committing, day 1.
 
 **Pipeline per clip.**
 1. Trim a few seconds of broadcast video around the moment. Keep clips short, broadcast footage is copyrighted and short excerpts for a hackathon demo are the defensible use.
@@ -121,7 +127,9 @@ Behaviour learning from viewer interactions, more than three personas, XR render
 | P1 | StatsBomb data pipeline, curation dataset, Gemma 4 SFT on AMD cloud, vLLM serving | Rate-extrapolation baseline, prompt-only curation |
 | P2 | CV pipeline, YOLO, homography, tracking, track JSON export | StatsBomb 360 freeze-frame path |
 | P3 | Frontend, match viewer, prediction panel, persona toggle + adaptive stat panels, Three.js 3D replay | Static diorama mode |
-| P4 | Replay engine, WebSocket backend, docker-compose, README, 5-min video, pitch deck | Demo script and rehearsal |
+| P4 | Replay engine (with seek/jump, required for video recording), derived stats, WebSocket backend, docker-compose, README, 5-min video, pitch deck | Demo script and rehearsal |
+
+P4 pairs with P1 on the dataset scripts on day 1, since P1 holds four critical-path deliverables while P4's heavy work (video, README) lands on day 3.
 
 ## Timeline
 
