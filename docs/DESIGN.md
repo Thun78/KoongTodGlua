@@ -27,6 +27,10 @@ The demo match is the 2022 World Cup final, Argentina vs France. Full event data
 
 ## Architecture
 
+See `docs/UI.md` for how the frontend is actually implemented today
+(Next.js/Zustand, what's real vs. placeholder math) and what to change
+as the services below come online.
+
 ```
 StatsBomb Open Data (free, real event-level data)
         │

@@ -36,10 +36,10 @@ export function HomeScreen() {
             </div>
           </div>
         </div>
-        <div className="font-mono text-xs text-muted">prototype · ui/ux pass</div>
+        <div className="font-mono text-xs text-muted">prototype</div>
       </header>
 
-      <main className="flex flex-1 flex-col items-center gap-10 px-11 pt-14 pb-18">
+      <main className="flex flex-1 flex-col items-center justify-center gap-10 px-11 py-14">
         <div className="flex max-w-[640px] flex-col gap-3 text-center">
           <h1 className="font-condensed text-[54px] leading-[1.02] font-extrabold tracking-[0.01em] uppercase">
             Watch the match,
@@ -70,7 +70,7 @@ export function HomeScreen() {
           >
             <div className="flex items-center gap-[18px]">
               <LiveBadge
-                label="REPLAY-AS-LIVE"
+                label="REPLAY"
                 className="gap-[7px] rounded px-2.5 py-[5px] text-[11px]"
                 dotClassName="size-[7px]"
               />

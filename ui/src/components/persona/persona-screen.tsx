@@ -5,18 +5,18 @@ import { useMatchStore } from "@/store/match-store";
 
 export function PersonaScreen() {
   const pickPersona = useMatchStore((s) => s.pickPersona);
-  const backHome = useMatchStore((s) => s.backHome);
+  const leavePersonaPicker = useMatchStore((s) => s.leavePersonaPicker);
 
   return (
     <div className="flex flex-1 animate-fade-up flex-col items-center justify-center gap-9 px-11 py-15">
       <div className="flex flex-col items-center gap-2.5 text-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo.png" alt="" className="h-[72px] w-auto" />
+        <img src="/logo.png" alt="" className="h-28 w-auto" />
         <h1 className="font-condensed text-[40px] font-extrabold tracking-[0.02em] uppercase">
           How do you watch?
         </h1>
         <p className="max-w-[460px] text-[15px] leading-normal text-muted-2">
-          Your pick shapes which live stats get shown during play. Change it
+          Your pick which live stats get shown during play. Change it
           anytime from settings.
         </p>
       </div>
@@ -50,7 +50,7 @@ export function PersonaScreen() {
 
       <button
         type="button"
-        onClick={backHome}
+        onClick={leavePersonaPicker}
         className="cursor-pointer text-[13px] text-muted underline hover:text-accent"
       >
         ← back

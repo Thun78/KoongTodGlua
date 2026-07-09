@@ -31,6 +31,10 @@ interface MatchState {
   backHome: () => void;
   pickPersona: (id: PersonaId) => void;
   openSettings: () => void;
+  /** persona screen's own back button: returns to the viewer if a
+   * persona is already picked (i.e. we arrived via Settings), otherwise
+   * to home (first-time entry from the match card). */
+  leavePersonaPicker: () => void;
   togglePlay: () => void;
   setSpeed: (v: number) => void;
   /** advance the clock one 500ms tick; auto-opens goal replays */
@@ -66,6 +70,12 @@ export const useMatchStore = create<MatchState>((set) => ({
   backHome: () => set({ screen: "home", playing: false }),
   pickPersona: (id) => set({ screen: "viewer", persona: id, playing: true }),
   openSettings: () => set({ screen: "persona", playing: false }),
+  leavePersonaPicker: () =>
+    set((s) =>
+      s.persona
+        ? { screen: "viewer", playing: true }
+        : { screen: "home", playing: false },
+    ),
   togglePlay: () => set((s) => ({ playing: !s.playing })),
   setSpeed: (v) => set({ speed: v }),
 
