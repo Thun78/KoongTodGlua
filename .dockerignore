@@ -5,4 +5,7 @@ docs
 ui/node_modules
 ui/.next
 ui/.gitignore
+replay-engine/app/data
+**/__pycache__
+**/.pytest_cache
 **/.DS_Store

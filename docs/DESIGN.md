@@ -165,3 +165,177 @@ Anchor these days to the real deadline once confirmed (open question below).
 1. Exact submission deadline (date, time, timezone). Needed to anchor the timeline.
 2. Which 2 or 3 goal clips to reconstruct. Messi's second (the team-move goal) and Mbappé's volley are the natural picks if footage quality allows.
 3. Gemma 4 variant size for the fine-tune. Decide day 1 based on what fits comfortably in MI300X memory with the AMD recipe defaults, smallest variant that produces reliable JSON wins.
+
+---
+
+## Feature design: Add Game flow + real playback (2026-07-10)
+
+Approved design for replacing the home screen's "[ match slot ]"
+placeholders with an in-web Add Game wizard, and wiring the UI to
+replay-engine so added matches (and the demo match) actually play real
+StatsBomb-derived stats. Supersedes the "further matches populated by
+backend" placeholder note above.
+
+### Scope decisions (settled with Thun)
+
+- **Full playback.** Adding a match means you can watch it: home list,
+  score bug, stats, momentum, and timeline all come from replay-engine
+  for whichever match is selected. The UI↔replay-engine integration is
+  part of this feature.
+- **Predictor panel** becomes the heuristic baseline from the fallback
+  plan (current real stats rate-extrapolated to 90', floored at the
+  current score, gentle priors before ~10', generic rationale line).
+  This is the seam model-svc later replaces. The demo-scripted 5-phase
+  narrative in ui/src/lib/simulation.ts is deleted with the rest of the
+  fake math.
+- **Wait in wizard.** After picking a match the form shows a progress
+  state for the ~15–60s server-side fetch+derive, then lands home with
+  the new card ready. No background-job machinery.
+- **No database.** Persistence is a named Docker volume on
+  replay-engine's data dir. Docker seeds the volume from the baked
+  demo-match data on first run; added matches survive restarts. (A
+  selections DB + refetch-on-restart was considered and rejected: the
+  DB needs its own volume anyway, so it adds a container without
+  removing the volume.)
+
+### Backend (replay-engine grows a write side)
+
+- Refactor derivation out of scripts/fetch_match.py into app/derive.py
+  (pure: meta + events → snapshots/timeline/catalog entry; writer).
+  CLI script and the Docker build fetch stage become thin wrappers —
+  build behavior unchanged, demo match still baked at image build.
+  StatsBomb calls go behind app/statsbomb_gateway.py so tests can fake
+  them without network.
+- New endpoints:
+  - GET /catalog/competitions — competitions grouped with seasons
+    (sb.competitions(), cached in memory after first call)
+  - GET /catalog/matches?competition_id=&season_id= — pickable matches
+    (match_id, date, stage, teams, score), cached per pair
+  - POST /matches {competition_id, season_id, match_id} — fetch →
+    derive → write to data dir → hot-add to in-memory store under a
+    lock; runs in FastAPI's worker threadpool. Idempotent (re-add
+    returns existing entry). Unknown IDs → 404; StatsBomb unreachable
+    → 502 with a message the wizard displays.
+  - GET /matches/{id}/snapshots — all 181 snapshots in one response
+    (playback loads bulk; per-minute /state remains for model-svc)
+- Runtime image gains statsbombpy+pandas (only the *add* path needs
+  network; watching stays offline-safe). CORS gains POST. compose:
+  named volume on /svc/app/data.
+
+### UI
+
+- src/lib/replay-client.ts — typed fetchers for all endpoints; base
+  URL from NEXT_PUBLIC_REPLAY_ENGINE_URL (default localhost:8000).
+- Home renders one dark match card per catalog entry (GET /matches)
+  plus one dashed "+ Add game" card reusing the slot aesthetic. Engine
+  unreachable → fall back to the hardcoded demo entry with a subtle
+  "replay engine offline" note; home never dies.
+- Add Game wizard: new screen in the existing state machine
+  (home | persona | viewer | addMatch), persona-screen styling.
+  Cascading reveal: competition select → season chips → match list
+  (date · stage · teams · score). Clicking a match POSTs, shows
+  progress, returns home on success; inline error + retry on failure
+  without losing selections.
+- Viewer: entering loads that match's snapshots + timeline once (one
+  loading splash), then all components stay synchronous via array
+  lookups — simulation.ts is deleted; team names come from the catalog
+  entry. Timeline markers/auto-replay use the real timeline (home team
+  red, away blue, cards gold, chances muted). 3D overlay "tracks:"
+  shows — for matches without pre-extracted track files.
+- match-store gains activeMatch; persona curation stays client-side,
+  fed real values (foul_flurry from snapshots).
+
+### Testing
+
+- pytest: catalog endpoints + POST /matches against a faked gateway
+  with canned frames (covering own-goal and missing-column cases),
+  idempotent re-add, 404/502. Existing 8 tests keep passing.
+- Frontend: next build + manual click-through add→watch; demo match
+  remains the rehearsed path.
+- docs/UI.md's "what changes when replay-engine lands" section gets
+  updated as this work executes it.
+
+### Out of scope
+
+model-svc (predict/curate via Gemma), WebSocket streaming, 3D track
+files for non-demo matches, persisting persona across reloads.
+(Deleting matches was originally out of scope but shipped 2026-07-10:
+`DELETE /matches/{id}` + a two-click confirm ✕ on each home card.)
+
+---
+
+## AI strategy decisions (2026-07-10)
+
+Settled after the judging rules were published. The rules that drove
+these calls: container ready within 60s, every response under 30s,
+no hardcoded/cached answers — evaluation uses unseen variants, and
+images must be publicly pullable linux/amd64.
+
+### Decision 1 — model-svc is the AI centerpiece and gets built first
+
+The predictor panel currently runs a client-side heuristic and persona
+curation is client-side rules; for an AI hackathon that is the gap.
+Priority order for remaining AI effort:
+
+1. **model-svc** (FastAPI): `POST /predict` and `POST /curate`,
+   `MODEL_BACKEND=fireworks` first (uses the $50 Fireworks credits),
+   wired into the predictor panel and adaptive-stats panels, replacing
+   `ui/src/lib/heuristics.ts`. A real model reasoning over unseen match
+   states is exactly what the no-hardcoding rule tests.
+2. **Fine-tune story**: SFT on MI300X + `vllm` backend behind the same
+   API — the AMD platform points and the Gemma bonus pool.
+3. **Gemma garnish in 3D moments**: one-line tactical read of each
+   goal's freeze-frame overlaid in the 3D scene. Cheap, real inference,
+   on-theme.
+4. `heuristic` backend remains the no-network fallback per the original
+   fallback philosophy.
+
+### Decision 2 — 3D moments are 360-freeze-frame dioramas, no footage
+
+The 3D moment replay is built from StatsBomb 360 freeze-frames (real
+recorded player positions per event) rendered as an orbitable low-poly
+scene. Verified availability: 426 fully-covered matches across 12
+tournaments (all of WC 2022 incl. the demo final, both Euros, Women's
+WC 2023, Bundesliga 23/24, La Liga 20/21, Ligue 1, MLS subset), so the
+feature generalizes to matches judges add themselves — no per-match
+footage, nothing shipped but JSON coordinates, no licensing exposure.
+Matches without 360 data degrade gracefully to the current placeholder
+with an explicit "no 360 data for this match" note.
+
+Honest framing for judges: the diorama is **data visualization, not
+AI** — player limbs/poses are canned assets picked by role (shooter,
+keeper, others), not inferred. The AI claims stay attached to Gemma
+(predict/curate/tactical captions) and, in the offline path only, to
+the YOLO/homography CV pipeline.
+
+### Decision 3 — no video anywhere in the shipped product
+
+- Full-match video in the repo/image: rejected (1–3GB per match breaks
+  the 60s pull/startup budget, cannot generalize to user-added matches,
+  and broadcast footage is copyrighted).
+- Pulling video from YouTube at runtime: rejected (pirated uploads get
+  taken down mid-judging, ToS, region blocks, and broadcast-to-event
+  clock sync is genuinely hard).
+- The live pitch view becomes a **2D schematic render from event
+  coordinates** (every StatsBomb event carries pitch x,y): SVG pitch,
+  ball marker interpolated along event locations, pass/carry trails,
+  event flashes. Events arrive every ~2s of match time, so plain
+  interpolation looks continuous — no AI needed and none claimed.
+- Footage-tracked animated buildup for 2–3 rehearsed demo goals stays
+  an optional offline dev-time polish (YOLO pipeline on a teammate's
+  laptop; only coordinate tracks would ship). Show it in the 5-minute
+  video, never at runtime.
+
+### Deliberately on the future-work slide (not built)
+
+- **Runtime "upload a goal clip → 3D scene"**: real AI-native feature
+  but collides with the 30s response rule (CPU YOLO over ~150 frames),
+  bloats the image with model weights, and fails unpredictably on
+  arbitrary user footage (close-ups/replay cuts break homography) —
+  the exact "demo dies on stage" risk the offline-CV decision exists
+  to avoid.
+- **Learned player-trajectory imputation** for a continuous 22-player
+  2D view: genuine ML (multi-agent trajectory prediction) but 360
+  frames lack cross-frame identities and only show visible players;
+  solving association + imputation is days of work for a smoother
+  minimap judges won't score.

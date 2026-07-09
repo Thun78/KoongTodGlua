@@ -1,0 +1,260 @@
+"""Turns one StatsBomb match into the derived objects/files the replay
+engine serves. Pure with respect to I/O except write_match; StatsBomb
+access goes through app.statsbomb_gateway so tests can fake it.
+
+Regulation time only (periods 1-2, stoppage clamped to 90.0) — the model
+predicts 90-minute finals by definition (docs/DESIGN.md)."""
+
+import json
+from pathlib import Path
+
+from app import statsbomb_gateway
+
+STEP = 0.5
+BIG_CHANCE_XG = 0.25
+
+# Trailing windows (minutes) for derived stats, per docs/DESIGN.md
+MOMENTUM_WINDOW = 10
+FOUL_FLURRY_WINDOW = 8
+FOUL_FLURRY_COUNT = 4
+
+
+def derive_match(meta, ev) -> dict:
+    import pandas as pd
+
+    home, away = meta["home_team"], meta["away_team"]
+    ev = ev[ev["period"] <= 2].copy()
+    ev["t"] = (ev["minute"] + ev["second"] / 60).clip(upper=90.0)
+    ev = ev.sort_values("t")
+
+    # statsbombpy only includes a column if some event in *this* match
+    # has it — e.g. a match with zero red/second-yellow cards simply
+    # lacks "bad_behaviour_card" entirely. Backfill any expected column
+    # that's absent; a missing column correctly means "no such event
+    # occurred", not an error.
+    for col in (
+        "shot_statsbomb_xg",
+        "shot_outcome",
+        "shot_type",
+        "pass_type",
+        "foul_committed_card",
+        "bad_behaviour_card",
+        "tactics",
+        "player",
+    ):
+        if col not in ev.columns:
+            ev[col] = pd.NA
+
+    is_shot = ev["type"] == "Shot"
+    # Own goals are a distinct event type ("Own Goal For" / "Own Goal
+    # Against"), not a Shot with outcome=="Goal" — miss this and any
+    # match with an own goal under-reports the score.
+    is_own_goal_for = ev["type"] == "Own Goal For"
+    is_goal = (is_shot & (ev["shot_outcome"] == "Goal")) | is_own_goal_for
+    is_corner = ev["pass_type"] == "Corner"
+    is_foul = ev["type"] == "Foul Committed"
+    is_card = ev["foul_committed_card"].notna() | ev["bad_behaviour_card"].notna()
+    is_pressure = ev["type"] == "Pressure"
+    xg = ev["shot_statsbomb_xg"].fillna(0.0)
+
+    def per_team(mask):
+        sub = ev[mask]
+        return [int((sub["team"] == home).sum()), int((sub["team"] == away).sum())]
+
+    def xg_pair(mask):
+        sub = ev[mask]
+        g = xg[mask]
+        return [
+            round(float(g[sub["team"] == home].sum()), 2),
+            round(float(g[sub["team"] == away].sum()), 2),
+        ]
+
+    # ---- formations timeline (Starting XI + Tactical Shift events) ----
+    def formation_str(v) -> str | None:
+        if not isinstance(v, dict):
+            return None
+        f = v.get("formation")
+        return "-".join(str(f)) if f is not None else None
+
+    tactics_rows = ev[ev["tactics"].notna()][["t", "team", "tactics"]]
+    formation_changes: list[tuple[float, str, str]] = []
+    for _, row in tactics_rows.iterrows():
+        s = formation_str(row["tactics"])
+        if s:
+            formation_changes.append((float(row["t"]), str(row["team"]), s))
+
+    def formations_at(m: float) -> list[str]:
+        current = {home: "—", away: "—"}
+        for t, team, f in formation_changes:
+            if t <= m:
+                current[team] = f
+        return [current[home], current[away]]
+
+    # ---- snapshots every 0.5 min ----
+    snapshots = []
+    n_steps = int(90 / STEP) + 1
+    for i in range(n_steps):
+        m = round(i * STEP, 1)
+        upto = ev["t"] <= m
+        window_lo = m - MOMENTUM_WINDOW
+
+        score = per_team(is_goal & upto)
+        shots = per_team(is_shot & upto)
+        xg_now = xg_pair(is_shot & upto)
+
+        # possession: share of events by possession_team (documented approximation)
+        sub = ev[upto]
+        n = len(sub)
+        poss_home = (
+            round(100 * (sub["possession_team"] == home).sum() / n) if n else 50
+        )
+
+        # pressing: pressure events per opposition possession
+        possessions_home = sub[sub["possession_team"] == home]["possession"].nunique()
+        possessions_away = sub[sub["possession_team"] == away]["possession"].nunique()
+        pressures = per_team(is_pressure & upto)
+        pressing = [
+            round(pressures[0] / max(1, possessions_away), 2),
+            round(pressures[1] / max(1, possessions_home), 2),
+        ]
+
+        # momentum: trailing-window xG differential squashed to 0..1 toward home
+        in_window = is_shot & upto & (ev["t"] > window_lo)
+        xg_win = xg_pair(in_window)
+        diff = xg_win[0] - xg_win[1]
+        momentum = round(0.5 + max(-0.5, min(0.5, diff * 0.6)), 2)
+
+        # foul flurry: combined fouls in trailing window
+        recent_fouls = int((is_foul & upto & (ev["t"] > m - FOUL_FLURRY_WINDOW)).sum())
+        foul_flurry = recent_fouls >= FOUL_FLURRY_COUNT
+
+        combined_pressing = pressing[0] + pressing[1]
+        snapshots.append(
+            {
+                "minute": m,
+                "score": score,
+                "xg": xg_now,
+                "shots": shots,
+                "corners": per_team(is_corner & upto),
+                "cards": per_team(is_card & upto),
+                "fouls": per_team(is_foul & upto),
+                "possession_split": [poss_home, 100 - poss_home],
+                "pressing": pressing,
+                "momentum": momentum,
+                "foul_flurry": foul_flurry,
+                "formations": formations_at(m),
+                # exact key names scripts/build_dataset.py trains on, so this
+                # snapshot can be forwarded verbatim to the fine-tuned model
+                "shots_accumulated": shots[0] + shots[1],
+                "momentum_10m": (
+                    f"{'+' if diff >= 0 else ''}{diff:.1f} xG "
+                    f"({'home' if diff >= 0 else 'away'} surge)"
+                    if abs(diff) >= 0.05
+                    else "Neutral (0.0 xG)"
+                ),
+                "pressing_intensity": "High" if combined_pressing >= 1.4 else "Moderate",
+            }
+        )
+
+    # own-goal pairs are linked via related_events; index the "Against"
+    # side by id so the "For" event (the one that counts toward the
+    # score) can look up who actually scored it
+    own_goal_against_by_id = (
+        ev[ev["type"] == "Own Goal Against"].set_index("id")
+        if (ev["type"] == "Own Goal Against").any()
+        else ev.iloc[0:0].set_index("id")
+    )
+
+    # ---- timeline (goals, cards, big chances) ----
+    timeline = []
+    for _, row in ev[is_goal | is_card | (is_shot & ~is_goal & (xg >= BIG_CHANCE_XG))].iterrows():
+        display_min = int(row["minute"]) + 1
+        team = str(row["team"])
+        player = str(row["player"]) if isinstance(row["player"], str) else ""
+        if row["type"] == "Own Goal For":
+            kind = "goal"
+            scorer_row = None
+            related = row.get("related_events")
+            for rel_id in related if isinstance(related, list) else []:
+                if rel_id in own_goal_against_by_id.index:
+                    scorer_row = own_goal_against_by_id.loc[rel_id]
+                    break
+            if scorer_row is not None:
+                label = f"Own goal — {team} (via {scorer_row['player']}, {scorer_row['team']})"
+            else:
+                label = f"Own goal — {team}"
+        elif row["type"] == "Shot" and row["shot_outcome"] == "Goal":
+            kind = "goal"
+            how = "penalty" if row.get("shot_type") == "Penalty" else "open play"
+            label = f"Goal — {team} {how} ({player})"
+        elif row["type"] == "Shot":
+            kind = "chance"
+            label = f"Big chance — {team}"
+        else:
+            card = (
+                row["foul_committed_card"]
+                if pd.notna(row["foul_committed_card"])
+                else row["bad_behaviour_card"]
+            )
+            kind = "card"
+            label = f"{card} — {team}"
+        timeline.append(
+            {
+                "display_min": display_min,
+                "minute": round(float(row["t"]), 1),
+                "type": kind,
+                "team": team,
+                "player": player,
+                "label": label,
+            }
+        )
+    timeline.sort(key=lambda e: (e["minute"], e["display_min"]))
+
+    final = snapshots[-1]
+    season_name = str(meta.get("season", "")).strip()
+    stage = str(meta.get("competition_stage", "")).strip()
+    label_bits = [b for b in (meta.get("competition_name"), season_name, stage) if b]
+    entry = {
+        "match_id": int(meta["match_id"]),
+        "home_team": str(home),
+        "away_team": str(away),
+        "label": " · ".join(str(b) for b in label_bits) or f"Match {meta['match_id']}",
+        "date": str(meta["match_date"]),
+        "regulation_score": final["score"],
+    }
+    return {"entry": entry, "snapshots": snapshots, "timeline": timeline}
+
+
+def fetch_and_derive(competition_id: int, season_id: int, match_id: int) -> dict:
+    matches = statsbomb_gateway.matches(competition_id, season_id)
+    rows = matches[matches["match_id"] == match_id]
+    if rows.empty:
+        raise LookupError(
+            f"match_id {match_id} not found in competition_id={competition_id} "
+            f"season_id={season_id}"
+        )
+    ev = statsbomb_gateway.events(match_id)
+    return derive_match(rows.iloc[0], ev)
+
+
+def delete_match(match_id: int, out_dir: Path) -> None:
+    """Remove a match's derived files and its catalog entry."""
+    catalog_path = out_dir / "matches.json"
+    if catalog_path.exists():
+        catalog = json.loads(catalog_path.read_text())
+        catalog = [m for m in catalog if m["match_id"] != match_id]
+        catalog_path.write_text(json.dumps(catalog, indent=1))
+    (out_dir / f"{match_id}_snapshots.json").unlink(missing_ok=True)
+    (out_dir / f"{match_id}_timeline.json").unlink(missing_ok=True)
+
+
+def write_match(data: dict, out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    match_id = data["entry"]["match_id"]
+    catalog_path = out_dir / "matches.json"
+    catalog = json.loads(catalog_path.read_text()) if catalog_path.exists() else []
+    catalog = [m for m in catalog if m["match_id"] != match_id]
+    catalog.append(data["entry"])
+    catalog_path.write_text(json.dumps(catalog, indent=1))
+    (out_dir / f"{match_id}_snapshots.json").write_text(json.dumps(data["snapshots"]))
+    (out_dir / f"{match_id}_timeline.json").write_text(json.dumps(data["timeline"], indent=1))

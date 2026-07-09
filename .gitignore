@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---- koongtodglua ----
+# The `build/` rule above is for Python packaging artifacts, but it also
+# swallows our repo-root build/ folder of Dockerfiles — re-include it.
+!/build/
+!/build/**
+
+# StatsBomb-derived data: never committed (license forbids redistributing
+# the data; regenerate with replay-engine/scripts/fetch_match.py)
+replay-engine/app/data/

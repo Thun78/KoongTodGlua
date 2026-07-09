@@ -1,12 +1,18 @@
 "use client";
 
+import { predictFinal } from "@/lib/heuristics";
 import { SHOW_RATIONALE } from "@/lib/match-data";
-import { computePrediction } from "@/lib/simulation";
-import { useMatchStore } from "@/store/match-store";
+import { snapshotAt, useMatchStore } from "@/store/match-store";
 
 export function PredictorPanel() {
-  const minute = useMatchStore((s) => s.minute);
-  const pred = computePrediction(minute);
+  const activeMatch = useMatchStore((s) => s.activeMatch);
+  const snap = useMatchStore((s) => snapshotAt(s.matchSnapshots, s.minute));
+
+  if (!snap || !activeMatch) return null;
+
+  const pred = predictFinal(snap);
+  const homeAbbr = activeMatch.home_team.slice(0, 3).toUpperCase();
+  const awayAbbr = activeMatch.away_team.slice(0, 3).toUpperCase();
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -14,19 +20,19 @@ export function PredictorPanel() {
         <div className="font-condensed text-[17px] font-bold tracking-[0.08em] text-accent-soft uppercase">
           Predicted final
         </div>
-        <div className="font-mono text-[10px] text-muted">gemma 4 · live</div>
+        <div className="font-mono text-[10px] text-muted">heuristic · live</div>
       </div>
 
       <div className="flex flex-col gap-3 rounded-[10px] border border-ink-3 bg-ink-2 p-4">
         <div className="flex items-baseline justify-center gap-3.5">
           <span className="font-condensed text-[15px] font-bold text-tan uppercase">
-            ARG
+            {homeAbbr}
           </span>
           <span className="font-condensed text-[42px] leading-none font-extrabold text-cream">
             {pred.score}
           </span>
           <span className="font-condensed text-[15px] font-bold text-tan uppercase">
-            FRA
+            {awayAbbr}
           </span>
         </div>
 
@@ -51,8 +57,12 @@ export function PredictorPanel() {
 
         <div className="flex flex-col gap-1">
           <div className="flex justify-between font-mono text-[9.5px] tracking-[0.08em] text-muted">
-            <span>POSSESSION · ARG {pred.possA}%</span>
-            <span>FRA {100 - pred.possA}%</span>
+            <span>
+              POSSESSION · {homeAbbr} {pred.possA}%
+            </span>
+            <span>
+              {awayAbbr} {100 - pred.possA}%
+            </span>
           </div>
           <div className="flex h-[7px] overflow-hidden rounded bg-ink-4">
             <div

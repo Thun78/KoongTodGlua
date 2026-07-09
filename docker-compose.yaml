@@ -9,3 +9,19 @@ services:
     environment:
       - NODE_ENV=production
     restart: unless-stopped
+
+  replay-engine:
+    build:
+      context: .
+      dockerfile: build/Dockerfile.replay-engine
+    container_name: replay-engine
+    ports:
+      - "8000:8000"
+    volumes:
+      # Seeded from the baked demo data on first creation; matches added
+      # via POST /matches persist here across restarts.
+      - replay-data:/svc/app/data
+    restart: unless-stopped
+
+volumes:
+  replay-data:

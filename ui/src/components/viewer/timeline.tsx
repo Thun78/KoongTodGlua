@@ -2,8 +2,16 @@
 
 import { useCallback, useRef } from "react";
 import { Chip } from "@/components/ui/chip";
-import { EVENTS, SPEEDS } from "@/lib/match-data";
+import { SPEEDS } from "@/lib/match-data";
+import type { TimelineEvent } from "@/lib/replay-client";
 import { useMatchStore } from "@/store/match-store";
+
+const markerStyle = (ev: TimelineEvent, homeTeam: string) =>
+  ev.type === "goal"
+    ? { glyph: "●", color: ev.team === homeTeam ? "#c8492a" : "#3a6ea5" }
+    : ev.type === "card"
+      ? { glyph: "▮", color: "#d9a62e" }
+      : { glyph: "◦", color: "#6b675e" };
 
 export function Timeline() {
   const minute = useMatchStore((s) => s.minute);
@@ -11,12 +19,14 @@ export function Timeline() {
   const setSpeed = useMatchStore((s) => s.setSpeed);
   const seek = useMatchStore((s) => s.seek);
   const jumpToEvent = useMatchStore((s) => s.jumpToEvent);
+  const events = useMatchStore((s) => s.matchTimeline);
+  const activeMatch = useMatchStore((s) => s.activeMatch);
 
   const trackRef = useRef<HTMLDivElement>(null);
   const progressPct = ((minute / 90) * 100).toFixed(1) + "%";
 
-  // Click-or-drag seeking anywhere on the track, ported from the design's
-  // scrubStart: seek on pointerdown, then follow pointermove until release.
+  // Click-or-drag seeking anywhere on the track: seek on pointerdown,
+  // then follow pointermove until release.
   const scrubStart = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const track = trackRef.current;
@@ -54,22 +64,25 @@ export function Timeline() {
           className="pointer-events-none absolute top-1.5 z-1 -ml-[7px] size-3.5 rounded-full border-[3px] border-accent bg-cream shadow-[0_1px_3px_rgba(42,41,37,0.35)]"
           style={{ left: progressPct }}
         />
-        {EVENTS.map((ev) => (
-          <button
-            key={`${ev.min}-${ev.label}`}
-            type="button"
-            title={ev.label}
-            onClick={() => jumpToEvent(ev)}
-            onPointerDown={(e) => e.stopPropagation()}
-            className="absolute top-1 z-2 -ml-[9px] flex size-[18px] cursor-pointer items-center justify-center rounded-full border-2 border-ink text-[9px] font-bold text-cream transition-transform hover:scale-135"
-            style={{
-              left: ((ev.min / 90) * 100).toFixed(1) + "%",
-              background: ev.color,
-            }}
-          >
-            {ev.glyph}
-          </button>
-        ))}
+        {events.map((ev, i) => {
+          const style = markerStyle(ev, activeMatch?.home_team ?? "");
+          return (
+            <button
+              key={`${ev.minute}-${ev.label}-${i}`}
+              type="button"
+              title={ev.label}
+              onClick={() => jumpToEvent(ev)}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="absolute top-1 z-2 -ml-[9px] flex size-[18px] cursor-pointer items-center justify-center rounded-full border-2 border-ink text-[9px] font-bold text-cream transition-transform hover:scale-135"
+              style={{
+                left: ((ev.minute / 90) * 100).toFixed(1) + "%",
+                background: style.color,
+              }}
+            >
+              {style.glyph}
+            </button>
+          );
+        })}
       </div>
 
       <div className="flex items-center justify-between">

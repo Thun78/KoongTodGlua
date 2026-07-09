@@ -8,12 +8,15 @@ import { ScoreBug } from "@/components/viewer/score-bug";
 import { Timeline } from "@/components/viewer/timeline";
 import { LiveBadge } from "@/components/ui/live-badge";
 import { useMatchClock } from "@/hooks/use-match-clock";
+import { useMatchData } from "@/hooks/use-match-data";
 import { PERSONAS } from "@/lib/match-data";
 import { useMatchStore } from "@/store/match-store";
 
 export function ViewerScreen() {
   useMatchClock();
+  const { loading, error } = useMatchData();
 
+  const activeMatch = useMatchStore((s) => s.activeMatch);
   const persona = useMatchStore((s) => s.persona);
   const playing = useMatchStore((s) => s.playing);
   const replayEvent = useMatchStore((s) => s.replayEvent);
@@ -26,7 +29,7 @@ export function ViewerScreen() {
   return (
     <div className="flex h-screen animate-fade-up-fast flex-col overflow-hidden">
       {/* Top bar */}
-      <header className="flex flex-none items-center justify-between gap-5 bg-ink px-5 py-2.5 text-cream">
+      <header className="flex flex-none items-center justify-between gap-5 bg-ink px-5 py-5 text-cream">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -34,10 +37,10 @@ export function ViewerScreen() {
             className="flex cursor-pointer items-center hover:opacity-70"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="Home" className="h-[34px] w-auto" />
+            <img src="/logo.png" alt="Home" className="h-[52px] w-auto" />
           </button>
           <div className="font-condensed text-lg font-bold tracking-[0.05em] uppercase">
-            World Cup Final 2022
+            {activeMatch?.label ?? "Match"}
           </div>
           <LiveBadge />
         </div>
@@ -62,19 +65,26 @@ export function ViewerScreen() {
         </div>
       </header>
 
-      {/* Main split: pitch + sidebar */}
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3.5 p-[18px]">
-          <ScoreBug />
-          <PitchView />
-          <Timeline />
+      {loading || error ? (
+        <div className="flex flex-1 items-center justify-center">
+          <div className="font-mono text-[13px] tracking-[0.06em] text-muted">
+            {error ?? "loading match data…"}
+          </div>
         </div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3.5 p-[18px]">
+            <ScoreBug />
+            <PitchView />
+            <Timeline />
+          </div>
 
-        <aside className="flex min-h-0 flex-none basis-[340px] flex-col gap-4 overflow-y-auto bg-ink px-[18px] pt-[18px] pb-6 text-cream">
-          <PredictorPanel />
-          <AdaptiveStats />
-        </aside>
-      </div>
+          <aside className="flex min-h-0 flex-none basis-[420px] flex-col gap-4 overflow-y-auto bg-ink px-[18px] pt-[18px] pb-6 text-cream">
+            <PredictorPanel />
+            <AdaptiveStats />
+          </aside>
+        </div>
+      )}
 
       {replayEvent && <ReplayOverlay />}
     </div>

@@ -1,18 +1,17 @@
 "use client";
 
+import { visibleStats } from "@/lib/heuristics";
 import { PERSONAS } from "@/lib/match-data";
-import { computeStats, computeVisibleStats } from "@/lib/simulation";
-import { useMatchStore } from "@/store/match-store";
+import { snapshotAt, useMatchStore } from "@/store/match-store";
 
 export function AdaptiveStats() {
   const minute = useMatchStore((s) => s.minute);
   const persona = useMatchStore((s) => s.persona);
+  const snap = useMatchStore((s) => snapshotAt(s.matchSnapshots, s.minute));
 
-  const st = computeStats(minute);
-  const vis = persona
-    ? computeVisibleStats(persona, st, minute)
-    : { list: [], hidden: 0 };
   const personaName = persona ? PERSONAS[persona].name : "you";
+  const vis =
+    snap && persona ? visibleStats(persona, snap, minute) : { list: [], hidden: 0 };
 
   return (
     <div className="flex flex-col gap-2.5">

@@ -1,0 +1,68 @@
+# syntax=docker/dockerfile:1.7
+# AdaptiveMatch UI — multi-stage Next.js build.
+# Build context is the repo root: docker compose build ui
+# (compose passes dockerfile: build/Dockerfile.ui)
+
+# ---------- Stage 1: Install dependencies ----------
+# Pinned to BUILDPLATFORM so npm ci runs natively when cross-compiling.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+COPY ui/package.json ui/package-lock.json ./
+RUN --mount=type=cache,id=adaptivematch-ui-npm-cache,target=/root/.npm,sharing=locked \
+    npm ci --prefer-offline --no-audit --no-fund
+
+# ---------- Stage 2: Build application ----------
+FROM --platform=$BUILDPLATFORM node:24-alpine AS build
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY ui .
+
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+# ---------- Stage 3: Production runtime ----------
+FROM node:24-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+COPY --from=build --chown=nextjs:nodejs /app/public ./public
+COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+CMD ["node", "server.js"]
+
+# ---------- Stage 4: Development (hot reload) ----------
+# Opt-in via `target: dev` in compose; bind-mount ./ui/src for live edits
+# and declare anonymous volumes for /app/node_modules and /app/.next.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS dev
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY ui .
+
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+# Polling fallback: fs events can drop through Docker Desktop's VirtioFS.
+ENV WATCHPACK_POLLING=true
+ENV CHOKIDAR_USEPOLLING=true
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]

@@ -1,5 +1,6 @@
 "use client";
 
+import { AddMatchScreen } from "@/components/add-match/add-match-screen";
 import { HomeScreen } from "@/components/home/home-screen";
 import { PersonaScreen } from "@/components/persona/persona-screen";
 import { ViewerScreen } from "@/components/viewer/viewer-screen";
@@ -13,6 +14,7 @@ export default function AdaptiveMatchPage() {
       {screen === "home" && <HomeScreen />}
       {screen === "persona" && <PersonaScreen />}
       {screen === "viewer" && <ViewerScreen />}
+      {screen === "addMatch" && <AddMatchScreen />}
     </div>
   );
 }

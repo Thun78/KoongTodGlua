@@ -6,7 +6,8 @@ import { useMatchStore } from "@/store/match-store";
 
 // Fullscreen 3D moment replay. The striped viewport is the seam where the
 // Three.js reconstruction (orbitable low-poly scene from tracked broadcast
-// footage) plugs in, keyed by the event's track file.
+// footage) plugs in. Track files come from the offline CV pipeline and
+// will be referenced from the backend timeline when that work lands.
 export function ReplayOverlay() {
   const replayEvent = useMatchStore((s) => s.replayEvent);
   const camera = useMatchStore((s) => s.camera);
@@ -27,7 +28,7 @@ export function ReplayOverlay() {
             3D MOMENT REPLAY
           </span>
           <div className="font-condensed text-2xl font-bold tracking-[0.04em] uppercase">
-            {replayEvent.label} · {replayEvent.min}&apos;
+            {replayEvent.label} · {replayEvent.display_min}&apos;
           </div>
         </div>
         <button
@@ -53,7 +54,7 @@ export function ReplayOverlay() {
           </div>
         </div>
         <div className="absolute top-4 left-5 font-mono text-[10px] tracking-[0.08em] text-muted-3">
-          tracks: {replayEvent.track ?? "—"}
+          tracks: —
         </div>
       </div>
 
