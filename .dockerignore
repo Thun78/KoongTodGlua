@@ -1,0 +1,8 @@
+.git
+.venv
+build
+docs
+ui/node_modules
+ui/.next
+ui/.gitignore
+**/.DS_Store

@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+/* ========================================
+   TAILWIND v4 THEME — AdaptiveMatch palette
+   Source of truth: AdaptiveMatch Viewer.dc.html
+   ======================================== */
+
+@theme {
+  /* Paper / light surfaces */
+  --color-cream: #f6efe2;
+  --color-card: #fdfaf3;
+  --color-panel: #efe5d2;
+  --color-panel-deep: #e7dac2;
+
+  /* Ink / dark surfaces */
+  --color-ink: #2a2925;
+  --color-ink-2: #35332e;
+  --color-ink-3: #45423b;
+  --color-ink-4: #4a4842;
+  --color-ink-deep: #232220;
+  --color-night: #1a1916;
+
+  /* Accent */
+  --color-accent: #c8492a;
+  --color-accent-dark: #a33a20;
+  --color-accent-soft: #e8a18c;
+
+  /* Neutrals */
+  --color-muted: #8a8175;
+  --color-muted-2: #5c554a;
+  --color-muted-3: #6b675e;
+  --color-tan: #b8ae9e;
+  --color-sand: #cbbfa8;
+  --color-sand-2: #a79c89;
+  --color-track: #e0d4bc;
+  --color-track-2: #d9ccb2;
+
+  /* Event colors */
+  --color-gold: #d9a62e;
+  --color-blue: #3a6ea5;
+
+  /* Fonts (variables injected by next/font in layout.tsx) */
+  --font-sans: var(--font-barlow), system-ui, sans-serif;
+  --font-condensed: var(--font-barlow-condensed), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), Menlo, monospace;
+
+  /* Animations */
+  --animate-live-pulse: live-pulse 1.4s infinite;
+  --animate-fade-up: fade-up 0.35s ease;
+  --animate-fade-up-fast: fade-up 0.3s ease;
+  --animate-replay-in: replay-in 0.35s ease;
+
+  @keyframes live-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes replay-in {
+    from {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+a {
+  color: var(--color-accent);
+}
+a:hover {
+  color: var(--color-accent-dark);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink-4);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

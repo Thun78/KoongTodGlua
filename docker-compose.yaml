@@ -1,0 +1,11 @@
+services:
+  ui:
+    build:
+      context: .
+      dockerfile: build/Dockerfile.ui
+    container_name: UI
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
