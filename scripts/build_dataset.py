@@ -28,13 +28,13 @@ def build_dataset():
 
     for _, match in matches.iterrows():
         match_id = match['match_id']
-        # Filter out matches that went to extra time (regulation 90-min strictly)
-        if match['match_status_360'] != 'available' and match['score_penalty'] > 0:
-            continue
-
         try:
             events = sb.events(match_id=match_id)
         except Exception:
+            continue
+
+        # Filter out matches that went to extra time (regulation 90-min strictly)
+        if "period" in events.columns and events["period"].max() > 2:
             continue
 
         # Extract true regulation 90-min final stats
