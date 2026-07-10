@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   addMatch,
+  deleteMatch,
   getCatalogMatches,
   getClipStatuses,
   getCompetitions,
@@ -37,6 +38,7 @@ export function AddMatchScreen() {
   const [clipStatuses, setClipStatuses] = useState<Record<string, ClipStatus>>({});
   const [uploading, setUploading] = useState<Record<string, boolean>>({});
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  const [discarding, setDiscarding] = useState(false);
 
   useEffect(() => {
     getCompetitions()
@@ -208,18 +210,30 @@ export function AddMatchScreen() {
             </button>
             <button
               type="button"
-              onClick={() => {
-                // return to match picking (selections kept) so another
-                // match can be added; uploads already queued keep running
+              disabled={discarding}
+              onClick={async () => {
+                // leaving without Done discards the match entirely — it
+                // was only added (fetched + saved) so this step could
+                // show its goals; back-out shouldn't leave it in the catalog
+                if (addedMatch) {
+                  setDiscarding(true);
+                  try {
+                    await deleteMatch(addedMatch.match_id);
+                  } catch {
+                    // engine unreachable — nothing more we can do client-side
+                  }
+                  setCatalog(await getMatches().catch(() => []));
+                }
                 setAddedMatch(null);
                 setGoals([]);
                 setClipStatuses({});
                 setUploadErrors({});
+                setDiscarding(false);
                 setPhase("picking");
               }}
-              className="cursor-pointer text-[13px] text-muted underline hover:text-accent"
+              className="cursor-pointer text-[13px] text-muted underline hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
-              ← back
+              {discarding ? "discarding…" : "← back"}
             </button>
           </div>
         </div>

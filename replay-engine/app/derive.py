@@ -238,7 +238,8 @@ def fetch_and_derive(competition_id: int, season_id: int, match_id: int) -> dict
 
 
 def delete_match(match_id: int, out_dir: Path) -> None:
-    """Remove a match's derived files and its catalog entry."""
+    """Remove a match's derived files, its catalog entry, and any
+    uploaded reconstruction clips/status for it (Layer 3b)."""
     catalog_path = out_dir / "matches.json"
     if catalog_path.exists():
         catalog = json.loads(catalog_path.read_text())
@@ -246,6 +247,14 @@ def delete_match(match_id: int, out_dir: Path) -> None:
         catalog_path.write_text(json.dumps(catalog, indent=1))
     (out_dir / f"{match_id}_snapshots.json").unlink(missing_ok=True)
     (out_dir / f"{match_id}_timeline.json").unlink(missing_ok=True)
+
+    clips_status_path = out_dir / "clips_status.json"
+    if clips_status_path.exists():
+        statuses = json.loads(clips_status_path.read_text())
+        if statuses.pop(str(match_id), None) is not None:
+            clips_status_path.write_text(json.dumps(statuses, indent=1))
+    for clip_file in (out_dir / "clips").glob(f"{match_id}_*"):
+        clip_file.unlink(missing_ok=True)
 
 
 def write_match(data: dict, out_dir: Path) -> None:

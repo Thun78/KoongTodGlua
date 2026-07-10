@@ -1,6 +1,7 @@
 import json
 
-from app.derive import derive_match, write_match
+from app.clips import save_clip
+from app.derive import delete_match, derive_match, write_match
 
 
 def test_score_includes_own_goals(fake_meta, fake_events):
@@ -33,3 +34,23 @@ def test_write_match_upserts(tmp_path, fake_meta, fake_events):
     write_match(out, tmp_path)  # idempotent
     catalog = json.loads((tmp_path / "matches.json").read_text())
     assert [m["match_id"] for m in catalog] == [111]
+
+
+def test_delete_match_removes_files_and_clips(tmp_path, fake_meta, fake_events):
+    import io
+
+    out = derive_match(fake_meta, fake_events)
+    write_match(out, tmp_path)
+    save_clip(tmp_path, 111, 30.0, "goal.mp4", io.BytesIO(b"x"))
+    assert (tmp_path / "111_snapshots.json").exists()
+    assert (tmp_path / "clips" / "111_30.0.mp4").exists()
+
+    delete_match(111, tmp_path)
+
+    assert not (tmp_path / "111_snapshots.json").exists()
+    assert not (tmp_path / "111_timeline.json").exists()
+    assert not (tmp_path / "clips" / "111_30.0.mp4").exists()
+    catalog = json.loads((tmp_path / "matches.json").read_text())
+    assert all(m["match_id"] != 111 for m in catalog)
+    statuses = json.loads((tmp_path / "clips_status.json").read_text())
+    assert "111" not in statuses
