@@ -19,7 +19,11 @@ FOUL_FLURRY_WINDOW = 8
 FOUL_FLURRY_COUNT = 4
 
 
-def derive_match(meta, ev) -> dict:
+def derive_match(meta, ev, frames=None) -> dict:
+    """frames: optional 360 freeze-frame DataFrame (one row per visible
+    player per event id, from statsbomb_gateway.frames). None/empty =
+    match without 360 coverage — moments come out empty, timeline goals
+    get has_3d=False, everything else is unaffected."""
     import pandas as pd
 
     home, away = meta["home_team"], meta["away_team"]
@@ -273,6 +277,77 @@ def derive_match(meta, ev) -> dict:
             ]
         )
 
+    # ---- moments (Layer 3a: 360 diorama) ----
+    # One entry per SHOT goal (own goals have no shooter freeze-frame →
+    # no moment, has_3d False). Player positions come from the 360
+    # freeze-frame for the shot event; 360 coords share the event
+    # coordinate convention (attacking left→right), so away-team goals
+    # get the same (120−x, 80−y) flip as flow. Shot end keeps z (height
+    # into the goal) — that's the diorama's data-driven ball arc.
+    moments = []
+    if frames is not None and len(frames):
+        for _, row in ev[is_goal & is_shot].iterrows():
+            sub = frames[frames["id"] == row["id"]]
+            if sub.empty:
+                continue
+            goal_away = str(row["team"]) == away
+
+            def _flip(x: float, y: float) -> tuple[float, float]:
+                return (120.0 - x, 80.0 - y) if goal_away else (x, y)
+
+            start = _xy(row["location"])
+            if start:
+                start = [round(v, 1) for v in _flip(*start)]
+            end3 = row["shot_end_location"]
+            end = None
+            if isinstance(end3, (list, tuple)) and len(end3) >= 2:
+                ex, ey = _flip(float(end3[0]), float(end3[1]))
+                ez = float(end3[2]) if len(end3) > 2 else 0.0
+                end = [round(ex, 1), round(ey, 1), round(ez, 2)]
+
+            players = []
+            for _, p in sub.iterrows():
+                loc = _xy(p["location"])
+                if loc is None:
+                    continue
+                px, py = _flip(*loc)
+                on_goal_team = bool(p["teammate"]) or bool(p["actor"])
+                if goal_away:
+                    side = "a" if on_goal_team else "h"
+                else:
+                    side = "h" if on_goal_team else "a"
+                players.append(
+                    {
+                        "x": round(px, 1),
+                        "y": round(py, 1),
+                        "side": side,
+                        "actor": bool(p["actor"]),
+                        "keeper": bool(p["keeper"]),
+                    }
+                )
+
+            moments.append(
+                {
+                    "minute": round(float(row["t"]), 1),
+                    "display_min": int(row["minute"]) + 1,
+                    "team": "a" if goal_away else "h",
+                    "scorer": str(row["player"]) if isinstance(row["player"], str) else "",
+                    "penalty": isinstance(row["shot_type"], str)
+                    and row["shot_type"] == "Penalty",
+                    "xg": round(float(row["shot_statsbomb_xg"]), 2)
+                    if pd.notna(row["shot_statsbomb_xg"])
+                    else None,
+                    "shot_start": start,
+                    "shot_end": end,
+                    "players": players,
+                }
+            )
+
+    moment_minutes = {m["minute"] for m in moments}
+    for e in timeline:
+        if e["type"] == "goal":
+            e["has_3d"] = e["minute"] in moment_minutes
+
     final = snapshots[-1]
     season_name = str(meta.get("season", "")).strip()
     stage = str(meta.get("competition_stage", "")).strip()
@@ -285,7 +360,13 @@ def derive_match(meta, ev) -> dict:
         "date": str(meta["match_date"]),
         "regulation_score": final["score"],
     }
-    return {"entry": entry, "snapshots": snapshots, "timeline": timeline, "flow": flow}
+    return {
+        "entry": entry,
+        "snapshots": snapshots,
+        "timeline": timeline,
+        "flow": flow,
+        "moments": moments,
+    }
 
 
 def fetch_and_derive(competition_id: int, season_id: int, match_id: int) -> dict:
@@ -297,7 +378,13 @@ def fetch_and_derive(competition_id: int, season_id: int, match_id: int) -> dict
             f"season_id={season_id}"
         )
     ev = statsbomb_gateway.events(match_id)
-    return derive_match(rows.iloc[0], ev)
+    try:
+        frames = statsbomb_gateway.frames(match_id)
+    except Exception:
+        # no 360 coverage for this match (or fetch hiccup) — degrade
+        # gracefully to no moments rather than failing the whole add
+        frames = None
+    return derive_match(rows.iloc[0], ev, frames)
 
 
 def delete_match(match_id: int, out_dir: Path) -> None:
@@ -311,6 +398,7 @@ def delete_match(match_id: int, out_dir: Path) -> None:
     (out_dir / f"{match_id}_snapshots.json").unlink(missing_ok=True)
     (out_dir / f"{match_id}_timeline.json").unlink(missing_ok=True)
     (out_dir / f"{match_id}_flow.json").unlink(missing_ok=True)
+    (out_dir / f"{match_id}_moments.json").unlink(missing_ok=True)
 
     clips_status_path = out_dir / "clips_status.json"
     if clips_status_path.exists():
@@ -334,3 +422,6 @@ def write_match(data: dict, out_dir: Path) -> None:
     # compact on purpose (~100–150KB/match); .get so data derived before
     # the flow feature still writes cleanly
     (out_dir / f"{match_id}_flow.json").write_text(json.dumps(data.get("flow", [])))
+    (out_dir / f"{match_id}_moments.json").write_text(
+        json.dumps(data.get("moments", []), indent=1)
+    )

@@ -25,6 +25,9 @@ class TimelineEvent(BaseModel):
     team: str
     player: str
     label: str
+    # goals only: True when a 360 freeze-frame moment exists (Layer 3a).
+    # Default False so timelines derived before this feature validate.
+    has_3d: bool = False
 
 
 class MatchStateSnapshot(BaseModel):

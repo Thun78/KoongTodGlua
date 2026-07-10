@@ -87,6 +87,17 @@ def flow(match_id: int) -> list:
     return fl
 
 
+@app.get("/matches/{match_id}/moments")
+def moments(match_id: int) -> list:
+    """Layer 3a diorama data: one entry per shot-goal with the 360
+    freeze-frame players (coords pre-normalized) and the shot's start +
+    3D end location. Empty list = no 360 coverage for this match."""
+    mo = store.moments(match_id)
+    if mo is None:
+        raise HTTPException(status_code=404, detail=f"unknown match {match_id}")
+    return mo
+
+
 @app.get("/matches/{match_id}/snapshots", response_model=list[MatchStateSnapshot])
 def snapshots(match_id: int) -> list[dict]:
     m = store.matches.get(match_id)
@@ -122,7 +133,11 @@ def add_match(req: AddMatchRequest) -> dict:
             raise HTTPException(status_code=502, detail=f"StatsBomb fetch failed: {e}")
         derive.write_match(data, DATA_DIR)
         store.add_match(
-            data["entry"], data["snapshots"], data["timeline"], data.get("flow")
+            data["entry"],
+            data["snapshots"],
+            data["timeline"],
+            data.get("flow"),
+            data.get("moments"),
         )
         return data["entry"]
 

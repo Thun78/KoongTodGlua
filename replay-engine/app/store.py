@@ -22,6 +22,7 @@ class MatchStore:
         for info in json.loads(catalog_path.read_text()):
             mid = info["match_id"]
             flow_path = data_dir / f"{mid}_flow.json"
+            moments_path = data_dir / f"{mid}_moments.json"
             self.matches[mid] = {
                 "info": info,
                 "snapshots": json.loads(
@@ -36,6 +37,9 @@ class MatchStore:
                 "flow": json.loads(flow_path.read_text())
                 if flow_path.exists()
                 else [],
+                "moments": json.loads(moments_path.read_text())
+                if moments_path.exists()
+                else [],
             }
 
     def add_match(
@@ -44,12 +48,14 @@ class MatchStore:
         snapshots: list[dict],
         timeline: list[dict],
         flow: list | None = None,
+        moments: list | None = None,
     ) -> None:
         self.matches[entry["match_id"]] = {
             "info": entry,
             "snapshots": snapshots,
             "timeline": timeline,
             "flow": flow or [],
+            "moments": moments or [],
         }
 
     def catalog(self) -> list[dict]:
@@ -63,6 +69,11 @@ class MatchStore:
         """None = unknown match; [] = known match without flow data."""
         m = self.matches.get(match_id)
         return m["flow"] if m else None
+
+    def moments(self, match_id: int) -> list | None:
+        """None = unknown match; [] = no 360 data for this match."""
+        m = self.matches.get(match_id)
+        return m["moments"] if m else None
 
     def state(self, match_id: int, minute: float) -> dict | None:
         """Snapshot nearest to `minute` (snapshots are every 0.5 min)."""
