@@ -75,6 +75,17 @@ One `docker-compose.yaml` runs everything. The client owns the match
 clock; scrubbing/seeking is pure function-of-minute lookups, which is
 what keeps every response well under the 30s judging budget.
 
+## Tech stack
+
+| Layer | Tech |
+|---|---|
+| Frontend | Next.js 16 · TypeScript · Tailwind v4 · Zustand · Three.js via React Three Fiber + drei (3D replay) · SVG (2D pitch) |
+| Backend | Python 3.13 · FastAPI · Pydantic v2 · statsbombpy + pandas (derivation) · pytest |
+| AI — predictions & curation | Gemma 4 · SFT with Unsloth + LoRA + TRL · vLLM on ROCm (serving) · Fireworks AI (hosted dev/judge backend) |
+| AI — computer vision | Ultralytics YOLOv8 (COCO pretrained, nothing trained) · ByteTrack · OpenCV (click-calibrated homography, LK optical-flow pan propagation, jersey k-means) · SciPy (track smoothing) |
+| Data | StatsBomb Open Data (events + 360 freeze-frames) |
+| Infra | AMD Instinct MI300X on AMD Developer Cloud · PyTorch ROCm · Docker Compose (linux/amd64 via buildx) · GHCR |
+
 ## Quickstart (judges)
 
 ```bash
