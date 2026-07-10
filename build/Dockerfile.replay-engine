@@ -23,7 +23,7 @@ WORKDIR /svc
 # statsbombpy+pandas needed at runtime for the add-match path only;
 # watching already-added matches never touches the network
 RUN --mount=type=cache,id=replay-engine-pip,target=/root/.cache/pip \
-    pip install fastapi uvicorn statsbombpy pandas
+    pip install fastapi uvicorn statsbombpy pandas python-multipart httpx
 
 RUN useradd --system --create-home svc
 COPY --chown=svc replay-engine/app ./app

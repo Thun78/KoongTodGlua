@@ -11,12 +11,13 @@ published analysis.
 import os
 import threading
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import derive, statsbomb_gateway
+from app import clips, derive, statsbomb_gateway
 from app.schemas import (
     AddMatchRequest,
+    Capabilities,
     CatalogMatch,
     CompetitionSeasons,
     Health,
@@ -42,9 +43,23 @@ store = MatchStore()
 _add_lock = threading.Lock()
 
 
+def _reconstruction_upload_enabled() -> bool:
+    return os.environ.get("RECONSTRUCTION_UPLOAD_ENABLED", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
 @app.get("/health", response_model=Health)
 def health() -> Health:
-    return Health(status="ok", matches_loaded=len(store.matches))
+    return Health(
+        status="ok",
+        matches_loaded=len(store.matches),
+        capabilities=Capabilities(
+            reconstruction_upload=_reconstruction_upload_enabled()
+        ),
+    )
 
 
 @app.get("/matches", response_model=list[MatchInfo])
@@ -105,6 +120,75 @@ def delete_match(match_id: int) -> None:
             raise HTTPException(status_code=404, detail=f"unknown match {match_id}")
         store.matches.pop(match_id)
         derive.delete_match(match_id, DATA_DIR)
+
+
+def _goal_minutes(match_id: int) -> list[float] | None:
+    tl = store.timeline(match_id)
+    if tl is None:
+        return None
+    return [e["minute"] for e in tl if e["type"] == "goal"]
+
+
+def _forward_to_reconstruction(match_id: int, minute: float) -> None:
+    """Fire-and-forget handoff; reconstruction-svc (separate service on
+    the MI300X) takes it from here. Without RECONSTRUCTION_SVC_URL the
+    clip simply stays queued."""
+    url = os.environ.get("RECONSTRUCTION_SVC_URL")
+    if not url:
+        return
+
+    def run() -> None:
+        import httpx
+
+        try:
+            r = httpx.post(
+                f"{url}/reconstruct",
+                json={"match_id": match_id, "minute": minute},
+                timeout=30,
+            )
+            clips.set_status(
+                DATA_DIR,
+                match_id,
+                minute,
+                "reconstructing" if r.is_success else "failed",
+                None if r.is_success else f"svc returned {r.status_code}",
+            )
+        except Exception as e:
+            clips.set_status(
+                DATA_DIR, match_id, minute, "failed", f"svc unreachable: {e}"
+            )
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+@app.post("/matches/{match_id}/goals/{minute}/clip")
+def upload_clip(match_id: int, minute: float, file: UploadFile) -> dict:
+    goals = _goal_minutes(match_id)
+    if goals is None:
+        raise HTTPException(status_code=404, detail=f"unknown match {match_id}")
+    if not any(abs(minute - g) < 0.01 for g in goals):
+        raise HTTPException(status_code=404, detail=f"no goal at minute {minute}")
+    if not (file.filename or "").lower().endswith((".mp4", ".mov", ".webm")) and not (
+        file.content_type or ""
+    ).startswith("video/"):
+        raise HTTPException(status_code=415, detail="upload an mp4/mov/webm video")
+    try:
+        entry = clips.save_clip(
+            DATA_DIR, match_id, minute, file.filename or "clip.mp4", file.file
+        )
+    except clips.OversizeError as e:
+        raise HTTPException(status_code=413, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=415, detail=str(e))
+    _forward_to_reconstruction(match_id, minute)
+    return entry
+
+
+@app.get("/matches/{match_id}/clips")
+def clips_status(match_id: int) -> dict:
+    if match_id not in store.matches:
+        raise HTTPException(status_code=404, detail=f"unknown match {match_id}")
+    return clips.clip_statuses(DATA_DIR, match_id)
 
 
 @app.get("/catalog/competitions", response_model=list[CompetitionSeasons])

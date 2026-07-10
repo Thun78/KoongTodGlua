@@ -46,9 +46,14 @@ class MatchStateSnapshot(BaseModel):
     pressing_intensity: str
 
 
+class Capabilities(BaseModel):
+    reconstruction_upload: bool
+
+
 class Health(BaseModel):
     status: str
     matches_loaded: int
+    capabilities: Capabilities
 
 
 class Season(BaseModel):

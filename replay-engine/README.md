@@ -18,6 +18,15 @@ committed** to this repo; they are produced on demand.
 - `GET /matches/{id}/timeline` — goals / cards / big chances (display minutes)
 - `GET /matches/{id}/state?minute=53.5` — full stats snapshot as of that minute
   (0–90, regulation only; snapshots are precomputed every 0.5 min)
+- `POST /matches/{id}/goals/{minute}/clip` — multipart video upload for a
+  goal's 3D reconstruction (mp4/mov/webm, ≤100MB); stored on the data
+  volume and marked `queued` until reconstruction-svc picks it up
+  (forwarded automatically when `RECONSTRUCTION_SVC_URL` is set)
+- `GET /matches/{id}/clips` — per-goal clip/reconstruction status
+
+The wizard's "3D Reconstruction" step is shown only when
+`RECONSTRUCTION_UPLOAD_ENABLED=true` (surfaced via `/health`
+`capabilities.reconstruction_upload`).
 
 The state payload is a superset of the `match_state` shape
 `scripts/build_dataset.py` trains the fine-tune on, so it can be

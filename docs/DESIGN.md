@@ -328,14 +328,126 @@ the YOLO/homography CV pipeline.
 
 ### Deliberately on the future-work slide (not built)
 
-- **Runtime "upload a goal clip → 3D scene"**: real AI-native feature
-  but collides with the 30s response rule (CPU YOLO over ~150 frames),
-  bloats the image with model weights, and fails unpredictably on
-  arbitrary user footage (close-ups/replay cuts break homography) —
-  the exact "demo dies on stage" risk the offline-CV decision exists
-  to avoid.
+- **Runtime "upload a goal clip → 3D scene"**: originally rejected here,
+  **superseded later the same day** — see "Feature design: Replay
+  visuals" below. The objections (30s rule, CPU inference, image bloat)
+  are resolved by running inference on the team's MI300X instead of the
+  judged container, and by placing upload inside the wizard's slow
+  path; arbitrary-footage fragility is absorbed by the 360-diorama
+  fallback. Remains conditional on a dedicated owner (~20h) — without
+  one it returns to this slide.
 - **Learned player-trajectory imputation** for a continuous 22-player
   2D view: genuine ML (multi-agent trajectory prediction) but 360
   frames lack cross-frame identities and only show visible players;
   solving association + imputation is days of work for a smoother
   minimap judges won't score.
+
+---
+
+## Feature design: Replay visuals — 2D living pitch, 360 dioramas, clip reconstruction (2026-07-10)
+
+Settled with Thun at T-31h to deadline (~80 person-hours across 4 people).
+Three pieces, strictly layered so each ships independently and failure of
+a later layer never degrades an earlier one.
+
+### Shared foundation — two new derived files
+
+`replay-engine/app/derive.py` grows two exports, produced in all three
+existing pipeline paths (dev fetch, Docker build stage, runtime
+POST /matches):
+
+- `{id}_flow.json` — one compact row per located regulation event:
+  `[t, x, y, eventCode, side, endX, endY]` (passes/carries/shots carry
+  end locations). ~100–150KB per match. Served at
+  `GET /matches/{id}/flow`.
+- `{id}_moments.json` — one entry per goal: the 360 freeze-frame (all
+  visible players' [x,y] + teammate/keeper/actor flags) plus the shot's
+  `location` and 3D `end_location` (x, y, height into the goal). Only
+  when the match has 360 data; timeline goals carry `has_3d`. Served at
+  `GET /matches/{id}/moments`.
+
+**Coordinate normalization (the silent-bug guard):** StatsBomb event and
+360 coordinates are attacking-team-relative (each team recorded as
+attacking left→right). Derivation normalizes to one frame — home team
+events unchanged, away team events flipped (120−x, 80−y) — with a unit
+test on a canned fixture. Both files are bulk-loaded once by
+`use-match-data` alongside snapshots/timeline; playback stays
+offline-after-load, scrub/seek stays a pure function of minute.
+
+### Layer 2 — 2D living pitch (replaces the striped placeholder)
+
+Schematic pitch in the app's own design language (ink markings on
+panel-cream, not broadcast green). Ball = accent dot interpolated
+between consecutive event locations (~2s of match time apart, so linear
+interpolation reads as continuous); rAF interpolation between clock
+ticks; snap instead of glide across large gaps. Trails: last ~5 events
+as fading polylines, home red / away blue. Event flashes: brief glyph
+pulse at the real location when the clock crosses fouls/corners/cards/
+shots. Momentum strip stays. No AI claimed, none used.
+Estimate: ~2–3h backend, ~4–6h frontend.
+
+### Layer 3a — 360 diorama (the guaranteed 3D moment)
+
+On goal trigger (auto-replay or timeline click), the replay overlay
+renders a real 3D scene via three.js / React Three Fiber + drei
+(client-only dynamic import): pitch plane with markings, goal frames,
+low-poly team-colored figures at true 360 positions (canned poses
+selected by role — shooter/keeper/other — oriented toward the ball;
+honest framing: data visualization, not AI). One data-driven motion:
+the ball flies from the shooter's foot along a physical arc to the
+exact recorded 3D spot in the goal, looping; the existing Slow-mo chip
+scales its speed and the camera-preset chips (behind keeper / aerial /
+touchline) fly the OrbitControls camera to fixed vantage points.
+Matches without 360 keep today's placeholder plus an explicit "no 360
+data for this match" note. Generalizes to all ~426 360-covered matches,
+i.e. judges' unseen inputs. Estimate: ~3–4h backend, ~6–9h frontend.
+
+### Layer 3b — clip-upload reconstruction (optional upgrade, wizard-only)
+
+**UX:** new wizard step revealed only after the match fetch completes
+(goal list requires the derived timeline): "4 · 3D Reconstruction
+(optional)". One row per goal with a drop zone (mp4/mov, ~100MB cap)
+and a status chip (no clip · uploading · reconstructing ~2min ·
+ready ✓ · failed + reason). Fire-and-forget: Done is always enabled,
+jobs continue server-side, the moment upgrades from frozen diorama to
+animated when its track lands. Wizard-only by decision — no upload
+affordance in the replay overlay (existing catalog matches will be
+deleted). The step is invisible unless replay-engine reports a
+reconstruction service configured (capabilities flag on /health driven
+by RECONSTRUCTION_SVC_URL), so judges without the GPU box never see it.
+
+**reconstruction-svc** (name chosen over "cv-svc" for clarity): FastAPI
+on the team's MI300X instance, PyTorch on ROCm (HSA_OVERRIDE_GFX_VERSION
+=9.4.2). Pipeline per clip, all pretrained — nothing is trained:
+ffmpeg/OpenCV decode → YOLO (Ultralytics) player+ball detection →
+ByteTrack identity tracking → jersey-color k-means team assignment →
+pitch-keypoint model + cv2.findHomography per frame (image→pitch
+coords via ground-contact points) → SciPy smoothing → fusion with
+StatsBomb (360 frame fills off-camera players; event location/
+end_location anchors the ball arc) → track JSON out (few KB). The clip
+is discarded after processing; only coordinates persist. This is the
+second AMD-usage story: CV inference served from MI300X via ROCm.
+
+**Plumbing:** browser → POST /matches/{id}/goals/{event}/clip
+(multipart) on replay-engine → streamed to reconstruction-svc → job id
+→ UI polls → on success replay-engine writes {match}_tracks_{event}.json
+to the data volume and marks the moment animated. Failures (bad angle,
+homography defeat, service down) mark that goal failed with reason; the
+diorama stays. Judged container never runs GPU work; 60s-startup and
+30s-response rules are untouched.
+
+**Staffing/risk decision:** Layer 3b requires one dedicated owner for
+their full remaining budget (~20h) plus the MI300X kept running through
+judging (~$2/hr from remaining credits); it dies to the diorama
+fallback whenever the instance is off. Layers 2 and 3a ship first and
+do not depend on it. If no owner exists, 3b moves to the future-work
+slide with a pipeline demo in the video only.
+
+### Verification
+
+Backend pytest: coordinate-flip fixture, flow ordering, moments only
+for goals, graceful no-360, existing suite green. next build; fresh
+docker compose from a clean volume; puppeteer click-through
+screenshotting the living pitch mid-move and the diorama mid-ball-
+flight on a wizard-added (unseen) match. Reconstruction path verified
+manually against one known-good wide-angle clip before demo recording.

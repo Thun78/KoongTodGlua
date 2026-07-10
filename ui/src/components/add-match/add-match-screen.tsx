@@ -4,14 +4,21 @@ import { useEffect, useState } from "react";
 import {
   addMatch,
   getCatalogMatches,
+  getClipStatuses,
   getCompetitions,
+  getHealth,
   getMatches,
+  getTimeline,
+  uploadClip,
   type CatalogMatch,
+  type ClipStatus,
   type CompetitionSeasons,
+  type MatchInfo,
+  type TimelineEvent,
 } from "@/lib/replay-client";
 import { useMatchStore } from "@/store/match-store";
 
-type Phase = "picking" | "submitting" | "error";
+type Phase = "picking" | "submitting" | "clips" | "error";
 
 export function AddMatchScreen() {
   const backHome = useMatchStore((s) => s.backHome);
@@ -23,6 +30,13 @@ export function AddMatchScreen() {
   const [matches, setMatches] = useState<CatalogMatch[] | null>(null);
   const [phase, setPhase] = useState<Phase>("picking");
   const [error, setError] = useState<string | null>(null);
+
+  // step 4 (3D reconstruction upload) state
+  const [addedMatch, setAddedMatch] = useState<MatchInfo | null>(null);
+  const [goals, setGoals] = useState<TimelineEvent[]>([]);
+  const [clipStatuses, setClipStatuses] = useState<Record<string, ClipStatus>>({});
+  const [uploading, setUploading] = useState<Record<string, boolean>>({});
+  const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     getCompetitions()
@@ -50,12 +64,51 @@ export function AddMatchScreen() {
     setPhase("submitting");
     setError(null);
     try {
-      await addMatch(comp.competition_id, seasonId, m.match_id);
+      const added = await addMatch(comp.competition_id, seasonId, m.match_id);
       setCatalog(await getMatches());
-      backHome();
+      const [health, timeline] = await Promise.all([
+        getHealth().catch(() => null),
+        getTimeline(added.match_id).catch(() => [] as TimelineEvent[]),
+      ]);
+      const goalEvents = timeline.filter((e) => e.type === "goal");
+      if (health?.capabilities.reconstruction_upload && goalEvents.length > 0) {
+        setAddedMatch(added);
+        setGoals(goalEvents);
+        setPhase("clips");
+      } else {
+        backHome();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Add failed.");
       setPhase("error");
+    }
+  };
+
+  // poll clip/reconstruction statuses while step 4 is on screen
+  useEffect(() => {
+    if (phase !== "clips" || !addedMatch) return;
+    const tick = () =>
+      getClipStatuses(addedMatch.match_id).then(setClipStatuses).catch(() => {});
+    tick();
+    const t = setInterval(tick, 3000);
+    return () => clearInterval(t);
+  }, [phase, addedMatch]);
+
+  const onClipPicked = async (ev: TimelineEvent, file: File) => {
+    if (!addedMatch) return;
+    const key = String(ev.minute);
+    setUploading((u) => ({ ...u, [key]: true }));
+    setUploadErrors((errs) => ({ ...errs, [key]: "" }));
+    try {
+      const st = await uploadClip(addedMatch.match_id, ev.minute, file);
+      setClipStatuses((s) => ({ ...s, [key]: st }));
+    } catch (e) {
+      setUploadErrors((errs) => ({
+        ...errs,
+        [key]: e instanceof Error ? e.message : "upload failed",
+      }));
+    } finally {
+      setUploading((u) => ({ ...u, [key]: false }));
     }
   };
 
@@ -75,6 +128,99 @@ export function AddMatchScreen() {
         <div className="flex flex-col items-center gap-3 py-10">
           <div className="animate-live-pulse font-mono text-[13px] tracking-[0.06em] text-muted">
             fetching events… deriving stats… (~30s)
+          </div>
+        </div>
+      ) : phase === "clips" && addedMatch ? (
+        <div className="flex w-full max-w-[720px] animate-fade-up flex-col gap-7">
+          <section className="flex flex-col gap-2.5">
+            <div className="font-condensed text-xl font-bold tracking-[0.06em] uppercase">
+              4 · 3D Reconstruction{" "}
+              <span className="text-muted normal-case">(optional)</span>
+            </div>
+            <p className="text-[13px] leading-normal text-muted-2">
+              Attach a short clip of each goal (a few seconds, wide broadcast
+              angle works best). The clip will be reconstructed into an animated 3D
+              scene on our AMD GPU. Skippable.
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {goals.map((g) => {
+                const key = String(g.minute);
+                const st = clipStatuses[key];
+                const chip = uploading[key]
+                  ? "uploading…"
+                  : uploadErrors[key]
+                    ? `failed: ${uploadErrors[key]}`
+                    : st
+                      ? st.status === "queued"
+                        ? "queued — reconstruction pending"
+                        : st.status === "reconstructing"
+                          ? "reconstructing ~2min"
+                          : st.status === "ready"
+                            ? "ready ✓"
+                            : `failed: ${st.error ?? "error"}`
+                      : "no clip";
+                return (
+                  <div
+                    key={key}
+                    className="flex items-center justify-between gap-4 rounded-lg border-2 border-ink bg-card px-4 py-2.5"
+                  >
+                    <span className="font-condensed text-[17px] font-bold">
+                      {g.display_min}&apos; · {g.label}
+                    </span>
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`font-mono text-[11px] ${
+                          st?.status === "ready" ||
+                          uploadErrors[key] ||
+                          st?.status === "failed"
+                            ? "text-accent"
+                            : "text-muted"
+                        }`}
+                      >
+                        {chip}
+                      </span>
+                      <label className="cursor-pointer rounded-[5px] border-[1.5px] border-sand px-3 py-1.5 font-mono text-[12px] text-muted-2 transition-colors hover:border-accent hover:text-accent">
+                        {st || uploading[key] ? "replace clip" : "⬆ add clip"}
+                        <input
+                          type="file"
+                          accept="video/mp4,video/quicktime,video/webm"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) onClipPicked(g, f);
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+          <div className="flex flex-col items-center gap-3">
+            <button
+              type="button"
+              onClick={backHome}
+              className="cursor-pointer self-center rounded-lg border-2 border-ink bg-ink px-8 py-2.5 font-condensed text-[17px] font-bold tracking-[0.06em] text-cream uppercase transition-colors hover:border-accent hover:bg-accent"
+            >
+              Done
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                // return to match picking (selections kept) so another
+                // match can be added; uploads already queued keep running
+                setAddedMatch(null);
+                setGoals([]);
+                setClipStatuses({});
+                setUploadErrors({});
+                setPhase("picking");
+              }}
+              className="cursor-pointer text-[13px] text-muted underline hover:text-accent"
+            >
+              ← back
+            </button>
           </div>
         </div>
       ) : (
@@ -184,13 +330,15 @@ export function AddMatchScreen() {
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={backHome}
-        className="cursor-pointer text-[13px] text-muted underline hover:text-accent"
-      >
-        ← back
-      </button>
+      {(phase === "picking" || phase === "error") && (
+        <button
+          type="button"
+          onClick={backHome}
+          className="cursor-pointer text-[13px] text-muted underline hover:text-accent"
+        >
+          ← back
+        </button>
+      )}
     </div>
   );
 }

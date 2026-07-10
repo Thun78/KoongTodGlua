@@ -16,15 +16,17 @@ export function ScoreBug() {
     (playing ? "" : " · paused");
 
   return (
-    <div className="flex items-center justify-center gap-[26px] rounded-xl bg-ink px-7 py-3.5 text-cream">
+    <div className="relative flex items-center justify-center gap-[26px] rounded-xl bg-ink px-7 py-4 text-cream">
       <div className="flex-1 text-right font-condensed text-[26px] font-bold tracking-[0.06em] uppercase">
         {activeMatch.home_team}
       </div>
-      <div className="flex flex-col items-center gap-0.5">
-        <div className="rounded-lg bg-accent px-[18px] py-1 font-condensed text-[44px] leading-none font-extrabold tracking-[0.04em]">
-          {snap.score[0]} – {snap.score[1]}
-        </div>
-        <div className="font-mono text-[13px] text-accent-soft">{clock}</div>
+      {/* clock is out of flow (pinned in the bar's bottom padding) so the
+          score box itself is what vertically centers */}
+      <div className="rounded-lg bg-accent px-[18px] py-1 font-condensed text-[44px] leading-none font-extrabold tracking-[0.04em]">
+        {snap.score[0]} – {snap.score[1]}
+      </div>
+      <div className="absolute bottom-[3px] left-1/2 -translate-x-1/2 font-mono text-[12px] leading-none whitespace-nowrap text-accent-soft">
+        {clock}
       </div>
       <div className="flex-1 font-condensed text-[26px] font-bold tracking-[0.06em] uppercase">
         {activeMatch.away_team}
