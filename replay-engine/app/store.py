@@ -21,6 +21,7 @@ class MatchStore:
             )
         for info in json.loads(catalog_path.read_text()):
             mid = info["match_id"]
+            flow_path = data_dir / f"{mid}_flow.json"
             self.matches[mid] = {
                 "info": info,
                 "snapshots": json.loads(
@@ -29,13 +30,26 @@ class MatchStore:
                 "timeline": json.loads(
                     (data_dir / f"{mid}_timeline.json").read_text()
                 ),
+                # matches derived before the flow feature (old volume
+                # data) have no flow file — empty flow, pitch degrades
+                # gracefully; re-adding the match regenerates it
+                "flow": json.loads(flow_path.read_text())
+                if flow_path.exists()
+                else [],
             }
 
-    def add_match(self, entry: dict, snapshots: list[dict], timeline: list[dict]) -> None:
+    def add_match(
+        self,
+        entry: dict,
+        snapshots: list[dict],
+        timeline: list[dict],
+        flow: list | None = None,
+    ) -> None:
         self.matches[entry["match_id"]] = {
             "info": entry,
             "snapshots": snapshots,
             "timeline": timeline,
+            "flow": flow or [],
         }
 
     def catalog(self) -> list[dict]:
@@ -44,6 +58,11 @@ class MatchStore:
     def timeline(self, match_id: int) -> list[dict] | None:
         m = self.matches.get(match_id)
         return m["timeline"] if m else None
+
+    def flow(self, match_id: int) -> list | None:
+        """None = unknown match; [] = known match without flow data."""
+        m = self.matches.get(match_id)
+        return m["flow"] if m else None
 
     def state(self, match_id: int, minute: float) -> dict | None:
         """Snapshot nearest to `minute` (snapshots are every 0.5 min)."""

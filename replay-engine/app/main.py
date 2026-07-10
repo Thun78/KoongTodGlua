@@ -75,6 +75,18 @@ def timeline(match_id: int) -> list[dict]:
     return tl
 
 
+@app.get("/matches/{match_id}/flow")
+def flow(match_id: int) -> list:
+    """Layer 2 living-pitch data: one compact row per located event,
+    [t, x, y, code, side, endX, endY]. Coordinates are already
+    normalized to one attacking frame (away flipped). Empty list =
+    match derived before the flow feature; re-add to regenerate."""
+    fl = store.flow(match_id)
+    if fl is None:
+        raise HTTPException(status_code=404, detail=f"unknown match {match_id}")
+    return fl
+
+
 @app.get("/matches/{match_id}/snapshots", response_model=list[MatchStateSnapshot])
 def snapshots(match_id: int) -> list[dict]:
     m = store.matches.get(match_id)
@@ -109,7 +121,9 @@ def add_match(req: AddMatchRequest) -> dict:
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"StatsBomb fetch failed: {e}")
         derive.write_match(data, DATA_DIR)
-        store.add_match(data["entry"], data["snapshots"], data["timeline"])
+        store.add_match(
+            data["entry"], data["snapshots"], data["timeline"], data.get("flow")
+        )
         return data["entry"]
 
 

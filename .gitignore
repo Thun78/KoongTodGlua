@@ -223,6 +223,12 @@ __marimo__/
 !/build/
 !/build/**
 
+# The Python template's `lib/` rule above was silently ignoring the
+# frontend's ui/src/lib/ (replay-client.ts, heuristics.ts) — same bug
+# class as build/. Without this exception the pushed repo doesn't build.
+!/ui/src/lib/
+!/ui/src/lib/**
+
 # StatsBomb-derived data: never committed (license forbids redistributing
 # the data; regenerate with replay-engine/scripts/fetch_match.py)
 replay-engine/app/data/

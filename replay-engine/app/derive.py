@@ -41,6 +41,10 @@ def derive_match(meta, ev) -> dict:
         "bad_behaviour_card",
         "tactics",
         "player",
+        "location",
+        "pass_end_location",
+        "carry_end_location",
+        "shot_end_location",
     ):
         if col not in ev.columns:
             ev[col] = pd.NA
@@ -210,6 +214,65 @@ def derive_match(meta, ev) -> dict:
         )
     timeline.sort(key=lambda e: (e["minute"], e["display_min"]))
 
+    # ---- flow (Layer 2: 2D living pitch) ----
+    # One compact row per *located* regulation event:
+    #   [t, x, y, code, side, endX, endY]   (endX/endY null unless
+    #   pass/carry/shot, which carry an end location)
+    # THE SILENT-BUG GUARD (docs/DESIGN.md "coordinate normalization"):
+    # StatsBomb records BOTH teams as attacking left→right, so away-team
+    # coordinates (and end locations) are flipped (120−x, 80−y) into one
+    # shared frame. Skipping this renders a garbled pitch that still
+    # "works" — hence the dedicated fixture test.
+    def _xy(v) -> tuple[float, float] | None:
+        if isinstance(v, (list, tuple)) and len(v) >= 2:
+            return float(v[0]), float(v[1])
+        return None
+
+    _END_COL = {
+        "Pass": "pass_end_location",
+        "Carry": "carry_end_location",
+        "Shot": "shot_end_location",  # 3D; z dropped here, kept for Layer 3a
+    }
+    _CODE = {
+        "Pass": "pass",
+        "Carry": "carry",
+        "Shot": "shot",
+        "Foul Committed": "foul",
+        "Pressure": "pressure",
+    }
+
+    flow = []
+    for _, row in ev.iterrows():
+        start = _xy(row["location"])
+        if start is None:
+            continue
+        etype = str(row["type"])
+        is_away = str(row["team"]) == away
+        x, y = start
+        if is_away:
+            x, y = 120.0 - x, 80.0 - y
+        pass_type = row["pass_type"]
+        if isinstance(pass_type, str) and pass_type == "Corner":
+            code = "corner"
+        elif pd.notna(row["foul_committed_card"]) or pd.notna(row["bad_behaviour_card"]):
+            code = "card"
+        else:
+            code = _CODE.get(etype, "other")
+        end = _xy(row[_END_COL[etype]]) if etype in _END_COL else None
+        if end is not None and is_away:
+            end = (120.0 - end[0], 80.0 - end[1])
+        flow.append(
+            [
+                round(float(row["t"]), 2),
+                round(x, 1),
+                round(y, 1),
+                code,
+                "a" if is_away else "h",
+                round(end[0], 1) if end else None,
+                round(end[1], 1) if end else None,
+            ]
+        )
+
     final = snapshots[-1]
     season_name = str(meta.get("season", "")).strip()
     stage = str(meta.get("competition_stage", "")).strip()
@@ -222,7 +285,7 @@ def derive_match(meta, ev) -> dict:
         "date": str(meta["match_date"]),
         "regulation_score": final["score"],
     }
-    return {"entry": entry, "snapshots": snapshots, "timeline": timeline}
+    return {"entry": entry, "snapshots": snapshots, "timeline": timeline, "flow": flow}
 
 
 def fetch_and_derive(competition_id: int, season_id: int, match_id: int) -> dict:
@@ -247,6 +310,7 @@ def delete_match(match_id: int, out_dir: Path) -> None:
         catalog_path.write_text(json.dumps(catalog, indent=1))
     (out_dir / f"{match_id}_snapshots.json").unlink(missing_ok=True)
     (out_dir / f"{match_id}_timeline.json").unlink(missing_ok=True)
+    (out_dir / f"{match_id}_flow.json").unlink(missing_ok=True)
 
     clips_status_path = out_dir / "clips_status.json"
     if clips_status_path.exists():
@@ -267,3 +331,6 @@ def write_match(data: dict, out_dir: Path) -> None:
     catalog_path.write_text(json.dumps(catalog, indent=1))
     (out_dir / f"{match_id}_snapshots.json").write_text(json.dumps(data["snapshots"]))
     (out_dir / f"{match_id}_timeline.json").write_text(json.dumps(data["timeline"], indent=1))
+    # compact on purpose (~100–150KB/match); .get so data derived before
+    # the flow feature still writes cleanly
+    (out_dir / f"{match_id}_flow.json").write_text(json.dumps(data.get("flow", [])))
