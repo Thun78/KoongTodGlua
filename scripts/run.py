@@ -4,8 +4,8 @@ import json
 # ==========================================
 # 1. CONFIGURATION
 # ==========================================
-json_file_path = "" 
-api_key = ""
+json_file_path = "data/events/7298.json" 
+api_key = "fw_5oTcj9fqM6U3Wd5pj1jRpH"
 TARGET_MINUTE = 65  # The live minute you want to generate a prediction for
 VIEWER_PERSONA = "Bettor"  # Options: Casual Fan, Analyst, Bettor
 
