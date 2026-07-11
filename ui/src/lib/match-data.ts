@@ -42,9 +42,15 @@ export const CAMERAS: { id: CameraId; label: string }[] = [
   { id: "touchline", label: "Touchline" },
 ];
 
-/** Playback speeds in match-minutes advanced per real second. */
-export const SPEEDS = [0.5, 1, 3];
+/** Playback speeds as multiples of real time (1 = live broadcast pace).
+ * The high multipliers exist because a real match is 90 minutes — demos
+ * and judges need a way to reach the goals without waiting. */
+export const SPEEDS = [0.5, 1, 2, 60];
 
 /** Behavior toggles (props in the original design component). */
 export const AUTO_REPLAY = true;
 export const SHOW_RATIONALE = true;
+
+/** Let the goal play out on the pitch before the 3D replay takes over
+ * (match-minutes; ~8s of match time). */
+export const REPLAY_DELAY_MIN = 8 / 60;

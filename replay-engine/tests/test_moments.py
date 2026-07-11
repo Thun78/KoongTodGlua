@@ -38,11 +38,11 @@ def goal_events():
            location=[108.0, 42.0], shot_end_location=[120.0, 41.0, 0.5],
            shot_outcome="Goal", shot_statsbomb_xg=0.4, shot_type="Open Play"),
         # away shot goal WITH a freeze-frame → everything must flip
-        _e(id="ag", minute=60, type="Shot", team="AwayFC", player="Away Striker",
+        _e(id="ag", minute=60, period=2, type="Shot", team="AwayFC", player="Away Striker",
            location=[110.0, 30.0], shot_end_location=[120.0, 44.0, 1.8],
            shot_outcome="Goal", shot_statsbomb_xg=0.2, shot_type="Penalty"),
         # home shot goal WITHOUT a freeze-frame → no moment, has_3d False
-        _e(id="ng", minute=80, type="Shot", team="HomeFC", player="Late Scorer",
+        _e(id="ng", minute=80, period=2, type="Shot", team="HomeFC", player="Late Scorer",
            location=[100.0, 40.0], shot_end_location=[120.0, 40.0],
            shot_outcome="Goal", shot_statsbomb_xg=0.1, shot_type="Open Play"),
     ]

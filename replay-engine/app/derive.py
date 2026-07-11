@@ -29,7 +29,13 @@ def derive_match(meta, ev, frames=None) -> dict:
     home, away = meta["home_team"], meta["away_team"]
     ev = ev[ev["period"] <= 2].copy()
     ev["t"] = (ev["minute"] + ev["second"] / 60).clip(upper=90.0)
-    ev = ev.sort_values("t")
+    # StatsBomb restarts period-2 clocks at 45:00 while first-half
+    # stoppage time runs past 45 — without these clamps, end-of-H1 and
+    # start-of-H2 events interleave when sorted by t (a stoppage-time
+    # shot gets "followed" 0.6s later by a kickoff pass in midfield).
+    ev.loc[ev["period"] == 1, "t"] = ev.loc[ev["period"] == 1, "t"].clip(upper=45.0)
+    ev.loc[ev["period"] == 2, "t"] = ev.loc[ev["period"] == 2, "t"].clip(lower=45.0)
+    ev = ev.sort_values(["t", "period"], kind="stable")
 
     # statsbombpy only includes a column if some event in *this* match
     # has it — e.g. a match with zero red/second-yellow cards simply
@@ -42,6 +48,7 @@ def derive_match(meta, ev, frames=None) -> dict:
         "shot_type",
         "pass_type",
         "foul_committed_card",
+        "foul_committed_penalty",
         "bad_behaviour_card",
         "tactics",
         "player",
@@ -243,6 +250,9 @@ def derive_match(meta, ev, frames=None) -> dict:
         "Shot": "shot",
         "Foul Committed": "foul",
         "Pressure": "pressure",
+        # located at the KEEPER, not the ball — clients exclude it from
+        # ball-path rendering, same as pressure
+        "Goal Keeper": "keeper",
     }
 
     flow = []
@@ -256,8 +266,17 @@ def derive_match(meta, ev, frames=None) -> dict:
         if is_away:
             x, y = 120.0 - x, 80.0 - y
         pass_type = row["pass_type"]
-        if isinstance(pass_type, str) and pass_type == "Corner":
-            code = "corner"
+        # restarts after the ball left play get their own codes so the
+        # pitch can announce them ("throw-in", "goal kick", "corner")
+        _RESTART = {"Corner": "corner", "Throw-in": "throw_in", "Goal Kick": "goal_kick"}
+        if isinstance(pass_type, str) and pass_type in _RESTART:
+            code = _RESTART[pass_type]
+        elif etype == "Foul Committed" and (
+            pd.notna(row["foul_committed_penalty"]) and bool(row["foul_committed_penalty"])
+        ):
+            # a foul that concedes a penalty says "penalty", even when it
+            # also drew a card
+            code = "penalty"
         elif pd.notna(row["foul_committed_card"]) or pd.notna(row["bad_behaviour_card"]):
             code = "card"
         else:

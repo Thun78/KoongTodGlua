@@ -87,6 +87,66 @@ def test_event_codes(fake_meta, located_events):
     assert codes == ["pass", "pass", "corner", "card", "shot", "carry"]
 
 
+def test_penalty_foul_coded_penalty_even_with_card(fake_meta, located_events):
+    import pandas as pd
+
+    extra = pd.DataFrame(
+        [
+            _e(id="pf", minute=8, type="Foul Committed", team="HomeFC",
+               location=[10.0, 42.0], foul_committed_penalty=True,
+               foul_committed_card="Yellow Card"),
+        ]
+    )
+    extra["tactics"] = None
+    events = pd.concat([located_events, extra], ignore_index=True)
+    codes = [r[3] for r in _flow(fake_meta, events)]
+    assert codes[-1] == "penalty"
+
+
+def test_halftime_clamp_orders_h1_stoppage_before_h2(fake_meta, located_events):
+    """Period-2 clocks restart at 45:00 while H1 stoppage exceeds 45 —
+    clamps must keep end-of-H1 events ordered before start-of-H2."""
+    import pandas as pd
+
+    extra = pd.DataFrame(
+        [
+            _e(id="st", minute=46, second=30, period=1, type="Shot", team="HomeFC",
+               location=[100.0, 40.0], shot_end_location=[120.0, 39.0, 0.5],
+               shot_outcome="Saved", shot_statsbomb_xg=0.2),
+            _e(id="ko", minute=45, second=0, period=2, type="Pass", team="AwayFC",
+               location=[60.0, 40.0], pass_end_location=[50.0, 40.0]),
+        ]
+    )
+    extra["tactics"] = None
+    events = pd.concat([located_events, extra], ignore_index=True)
+    flow = _flow(fake_meta, events)
+    ts = [r[0] for r in flow]
+    assert ts == sorted(ts)
+    # the H1 stoppage shot is clamped to 45.0 and sorted BEFORE the H2 kickoff
+    shot_idx = next(i for i, r in enumerate(flow) if r[3] == "shot" and r[0] == 45.0)
+    ko_idx = next(i for i, r in enumerate(flow) if r[3] == "pass" and r[0] == 45.0)
+    assert shot_idx < ko_idx
+
+
+def test_restart_codes_throw_in_and_goal_kick(fake_meta, located_events):
+    import pandas as pd
+
+    extra = pd.DataFrame(
+        [
+            _e(id="ti", minute=8, type="Pass", team="HomeFC",
+               location=[60.0, 0.0], pass_type="Throw-in",
+               pass_end_location=[55.0, 10.0]),
+            _e(id="gk", minute=9, type="Pass", team="AwayFC",
+               location=[114.0, 40.0], pass_type="Goal Kick",
+               pass_end_location=[60.0, 40.0]),
+        ]
+    )
+    extra["tactics"] = None
+    events = pd.concat([located_events, extra], ignore_index=True)
+    codes = [r[3] for r in _flow(fake_meta, events)]
+    assert codes[-2:] == ["throw_in", "goal_kick"]
+
+
 def test_corner_flipped_to_opposite_corner(fake_meta, located_events):
     t, x, y, *_ = _flow(fake_meta, located_events)[2]
     assert (x, y) == (0.0, 0.0)  # away [120,80] mirrors to origin

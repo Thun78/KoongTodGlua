@@ -4,8 +4,18 @@
 // overlay, and the replay-engine catalog / active-match data.
 
 import { create } from "zustand";
-import { AUTO_REPLAY, type CameraId, type PersonaId } from "@/lib/match-data";
-import type { MatchInfo, Snapshot, TimelineEvent } from "@/lib/replay-client";
+import {
+  AUTO_REPLAY,
+  REPLAY_DELAY_MIN,
+  type CameraId,
+  type PersonaId,
+} from "@/lib/match-data";
+import type {
+  FlowRow,
+  MatchInfo,
+  Snapshot,
+  TimelineEvent,
+} from "@/lib/replay-client";
 
 export type Screen = "home" | "persona" | "viewer" | "addMatch";
 
@@ -17,7 +27,7 @@ interface MatchState {
   personaPickerOrigin: "home" | "settings";
   minute: number;
   playing: boolean;
-  /** match-minutes advanced per real second */
+  /** playback rate as a multiple of real time (1 = live broadcast pace) */
   speed: number;
   camera: CameraId;
   slow: boolean;
@@ -31,9 +41,14 @@ interface MatchState {
   activeMatch: MatchInfo | null;
   matchTimeline: TimelineEvent[];
   matchSnapshots: Snapshot[];
+  matchFlow: FlowRow[];
 
   setCatalog: (matches: MatchInfo[], offline?: boolean) => void;
-  setMatchData: (snapshots: Snapshot[], timeline: TimelineEvent[]) => void;
+  setMatchData: (
+    snapshots: Snapshot[],
+    timeline: TimelineEvent[],
+    flow: FlowRow[],
+  ) => void;
   openAddMatch: () => void;
   enterMatch: (match: MatchInfo) => void;
   backHome: () => void;
@@ -77,11 +92,12 @@ export const useMatchStore = create<MatchState>((set) => ({
   activeMatch: null,
   matchTimeline: [],
   matchSnapshots: [],
+  matchFlow: [],
 
   setCatalog: (matches, offline = false) =>
     set({ catalog: matches, catalogOffline: offline }),
-  setMatchData: (snapshots, timeline) =>
-    set({ matchSnapshots: snapshots, matchTimeline: timeline }),
+  setMatchData: (snapshots, timeline, flow) =>
+    set({ matchSnapshots: snapshots, matchTimeline: timeline, matchFlow: flow }),
   openAddMatch: () => set({ screen: "addMatch" }),
   enterMatch: (match) =>
     set({
@@ -89,10 +105,12 @@ export const useMatchStore = create<MatchState>((set) => ({
       screen: "persona",
       personaPickerOrigin: "home",
       minute: 0,
+      speed: 1, // always start a match at real-time pace (60× is sticky otherwise)
       seenGoals: {},
       replayEvent: null,
       matchSnapshots: [],
       matchTimeline: [],
+      matchFlow: [],
     }),
   backHome: () => set({ screen: "home", playing: false }),
   pickPersona: (id) => set({ screen: "viewer", persona: id, playing: true }),
@@ -109,15 +127,23 @@ export const useMatchStore = create<MatchState>((set) => ({
 
   tick: () =>
     set((s) => {
-      if (!s.playing || s.replayEvent) return s;
-      const minute = Math.min(90, s.minute + s.speed * 0.5);
+      // don't advance while the replay overlay is open or before match
+      // data has loaded (otherwise kickoff is missed during the splash)
+      if (!s.playing || s.replayEvent || s.matchSnapshots.length === 0) return s;
+      // 500ms tick at speed× real time = speed * 0.5 real seconds of match
+      const minute = Math.min(90, s.minute + (s.speed * 0.5) / 60);
       const next: Partial<MatchState> = {
         minute,
         playing: minute < 90 ? s.playing : false,
       };
       if (AUTO_REPLAY) {
+        // fire a beat after the goal so it plays out on the pitch first
+        // (clamped so late goals still trigger before the clock stops)
         const goal = s.matchTimeline.find(
-          (e) => e.type === "goal" && minute >= e.minute && !s.seenGoals[e.minute],
+          (e) =>
+            e.type === "goal" &&
+            minute >= Math.min(e.minute + REPLAY_DELAY_MIN, 89.8) &&
+            !s.seenGoals[e.minute],
         );
         if (goal) {
           next.replayEvent = goal;

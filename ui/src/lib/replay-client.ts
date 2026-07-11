@@ -79,6 +79,23 @@ export const getCatalogMatches = (competitionId: number, seasonId: number) =>
     `/catalog/matches?competition_id=${competitionId}&season_id=${seasonId}`,
   );
 
+/** Layer 2 living-pitch row: [t, x, y, code, side, endX, endY].
+ * Coordinates are pre-normalized server-side (home attacks x→120,
+ * away x→0) — never flip client-side. endX/endY null except
+ * pass/carry/shot. */
+export type FlowRow = [
+  number,
+  number,
+  number,
+  string,
+  "h" | "a",
+  number | null,
+  number | null,
+];
+
+export const getFlow = (matchId: number) =>
+  get<FlowRow[]>(`/matches/${matchId}/flow`);
+
 export interface Capabilities {
   reconstruction_upload: boolean;
 }

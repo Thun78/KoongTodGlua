@@ -10,15 +10,25 @@ export function ScoreBug() {
 
   if (!snap || !activeMatch) return null;
 
+  const secs = Math.floor((minute % 1) * 60);
   const clock =
     String(Math.floor(minute)).padStart(2, "0") +
-    "'" +
+    ":" +
+    String(secs).padStart(2, "0") +
     (playing ? "" : " · paused");
 
   return (
     <div className="relative flex items-center justify-center gap-[26px] rounded-xl bg-ink px-7 py-4 text-cream">
-      <div className="flex-1 text-right font-condensed text-[26px] font-bold tracking-[0.06em] uppercase">
-        {activeMatch.home_team}
+      <div className="flex flex-1 items-center justify-end gap-2.5">
+        <span className="font-condensed text-[26px] font-bold tracking-[0.06em] uppercase">
+          {activeMatch.home_team}
+        </span>
+        {/* trail-color legend */}
+        <span
+          className="inline-block size-2.5 rounded-full"
+          style={{ background: "#c8492a" }}
+          title={`${activeMatch.home_team} trail color`}
+        />
       </div>
       {/* clock is out of flow (pinned in the bar's bottom padding) so the
           score box itself is what vertically centers */}
@@ -28,8 +38,16 @@ export function ScoreBug() {
       <div className="absolute bottom-[3px] left-1/2 -translate-x-1/2 font-mono text-[12px] leading-none whitespace-nowrap text-accent-soft">
         {clock}
       </div>
-      <div className="flex-1 font-condensed text-[26px] font-bold tracking-[0.06em] uppercase">
-        {activeMatch.away_team}
+      <div className="flex flex-1 items-center gap-2.5">
+        {/* trail-color legend */}
+        <span
+          className="inline-block size-2.5 rounded-full"
+          style={{ background: "#3a6ea5" }}
+          title={`${activeMatch.away_team} trail color`}
+        />
+        <span className="font-condensed text-[26px] font-bold tracking-[0.06em] uppercase">
+          {activeMatch.away_team}
+        </span>
       </div>
     </div>
   );
