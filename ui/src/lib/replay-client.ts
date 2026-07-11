@@ -96,6 +96,42 @@ export type FlowRow = [
 export const getFlow = (matchId: number) =>
   get<FlowRow[]>(`/matches/${matchId}/flow`);
 
+export interface ScorePair {
+  home: number;
+  away: number;
+}
+
+export interface LLMPrediction {
+  predicted_final_score: ScorePair;
+  predicted_final_possession: ScorePair;
+  predicted_final_corners: ScorePair;
+  predicted_final_yellow_cards: ScorePair;
+  curated_panels: string[];
+}
+
+export async function postPredict(
+  matchId: number,
+  minute: number,
+  persona: string,
+): Promise<LLMPrediction> {
+  const res = await fetch(
+    `${BASE}/matches/${matchId}/predict?minute=${minute}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ persona }),
+    },
+  );
+  if (!res.ok) {
+    const detail = await res
+      .json()
+      .then((d) => d.detail)
+      .catch(() => res.statusText);
+    throw new Error(String(detail));
+  }
+  return res.json();
+}
+
 export interface Capabilities {
   reconstruction_upload: boolean;
 }

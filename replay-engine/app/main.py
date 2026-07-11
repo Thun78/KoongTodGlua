@@ -23,8 +23,11 @@ from app.schemas import (
     Health,
     MatchInfo,
     MatchStateSnapshot,
+    PredictRequest,
+    PredictResponse,
     TimelineEvent,
 )
+from app import predictor
 from app.store import DATA_DIR, MatchStore
 
 app = FastAPI(title="AdaptiveMatch Replay Engine", version="0.2.0")
@@ -104,6 +107,28 @@ def snapshots(match_id: int) -> list[dict]:
     if m is None:
         raise HTTPException(status_code=404, detail=f"unknown match {match_id}")
     return m["snapshots"]
+
+
+@app.post("/matches/{match_id}/predict", response_model=PredictResponse)
+def predict_match(
+    match_id: int,
+    minute: float = Query(..., ge=0, le=90, description="match minute 0–90"),
+    body: PredictRequest = PredictRequest(),
+) -> dict:
+    """Call the fine-tuned Gemma model to predict final match statistics
+    from the current match state at the given minute."""
+    m = store.matches.get(match_id)
+    if m is None:
+        raise HTTPException(status_code=404, detail=f"unknown match {match_id}")
+    snap = store.state(match_id, minute)
+    if snap is None:
+        raise HTTPException(status_code=404, detail=f"no snapshot for minute {minute}")
+    snapshot_dict = predictor.snapshot_to_prompt_dict(m["info"], snap, minute)
+    try:
+        result = predictor.predict(snapshot_dict, body.persona)
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return result
 
 
 @app.get("/matches/{match_id}/state", response_model=MatchStateSnapshot)

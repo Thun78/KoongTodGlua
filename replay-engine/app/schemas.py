@@ -84,3 +84,20 @@ class AddMatchRequest(BaseModel):
     competition_id: int
     season_id: int
     match_id: int
+
+
+class PredictRequest(BaseModel):
+    persona: str = "bettor"
+
+
+class ScorePair(BaseModel):
+    home: int
+    away: int
+
+
+class PredictResponse(BaseModel):
+    predicted_final_score: ScorePair
+    predicted_final_possession: ScorePair
+    predicted_final_corners: ScorePair
+    predicted_final_yellow_cards: ScorePair
+    curated_panels: list[str]
